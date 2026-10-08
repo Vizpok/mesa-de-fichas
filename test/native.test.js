@@ -65,6 +65,44 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
     await t('no se registra service worker dentro de la app', async () => {
       assert.strictEqual(await page.evaluate(async () => navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : 0), 0);
     });
+    console.log('Botón atrás del celular');
+    const screenIs = async sel => { await page.waitForSelector(sel, { timeout: 4000 }); };
+    await t('atrás desde una pantalla vuelve al inicio, no sale de la app', async () => {
+      await page.evaluate(() => localStorage.removeItem('mf.session'));
+      await page.goto('http://app.test/');
+      await tap('[data-a="goJoin"]');
+      await screenIs('#f_code');
+      await page.goBack();
+      await screenIs('[data-a="goLocal"]');
+      assert.ok(page.url().startsWith('http://app.test/'));
+    });
+    await t('atrás cierra la hoja abierta antes de salir de la pantalla', async () => {
+      await tap('[data-a="goLocal"]');
+      for (const n of ['Ana', 'Beto']) { await page.fill('#f_lname', n); await tap('button[data-a="localAdd"]'); await page.waitForFunction(x => document.body.innerText.includes(x), n); }
+      await tap('[data-a="localStart"]');
+      await screenIs('[data-a="more"]');
+      await tap('[data-a="more"]');
+      await screenIs('.sheet');
+      await page.goBack();
+      await page.waitForFunction(() => !document.querySelector('.sheet'));
+      assert.ok(await page.$('[data-a="more"]'), 'sigue en la mesa');
+    });
+    await t('atrás desde la mesa va al inicio y ahí se puede continuar la partida', async () => {
+      await page.goBack();
+      await screenIs('[data-a="resumeLocal"]');
+      await tap('[data-a="resumeLocal"]');
+      await screenIs('[data-a="more"]');
+    });
+    await t('el botón ‹ de la app hace lo mismo que atrás', async () => {
+      await page.goBack();
+      await screenIs('[data-a="goLocal"]');
+      await tap('[data-a="goLocal"]');
+      await screenIs('#f_lname');
+      await tap('[data-a="home"]');
+      await screenIs('[data-a="goCreate"]');
+      await page.goBack();
+      await page.waitForFunction(() => location.href.indexOf('app.test') < 0);
+    });
     assert.deepStrictEqual(errors, []);
   } finally {
     await browser.close(); srv.kill();

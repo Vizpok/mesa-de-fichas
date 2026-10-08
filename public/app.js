@@ -82,7 +82,38 @@
     if (raf) return;
     raf = requestAnimationFrame(() => { raf = 0; doRender(); });
   }
+  /* ---------- Botón "atrás" del celular ----------
+     Cada nivel de profundidad (pantalla distinta del inicio, hoja abierta) es una entrada del historial,
+     así que "atrás" cierra la hoja o vuelve a la pantalla anterior en lugar de salir de la app. */
+  let histLvl = 0;
+  const navLevel = () => (S.screen !== 'home' ? 1 : 0) + (S.sheet ? 1 : 0);
+  function initHistory() {
+    try { histLvl = (history.state && history.state.mfLvl) || 0; history.replaceState({ mfLvl: histLvl }, ''); } catch (e) { histLvl = 0; }
+  }
+  function syncHistory() {
+    const want = navLevel();
+    try {
+      if (want > histLvl) { while (histLvl < want) { histLvl++; history.pushState({ mfLvl: histLvl }, ''); } }
+      else if (want < histLvl) { const d = want - histLvl; histLvl = want; history.go(d); }
+    } catch (e) { histLvl = want; }
+  }
+  function leaveScreen() {
+    if (S.screen === 'game') {
+      if (S.mode === 'online') closeSocket();
+      else if (S.mode === 'local' && LT) saveLocal();
+    }
+    S.screen = 'home'; S.error = null; S.canReclaim = false;
+  }
+  window.addEventListener('popstate', ev => {
+    const lvl = (ev.state && ev.state.mfLvl) || 0;
+    if (lvl === histLvl) return; // lo provocó la propia app
+    histLvl = lvl;
+    while (navLevel() > histLvl) { if (S.sheet) S.sheet = null; else leaveScreen(); }
+    render();
+  });
+
   function doRender() {
+    syncHistory();
     const ae = document.activeElement;
     let focus = null;
     if (ae && ae.dataset && ae.dataset.f) {
@@ -1045,6 +1076,7 @@
 
   /* ---------- Inicio ---------- */
   function boot() {
+    initHistory();
     S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0] };
     const qs = new URLSearchParams(location.search).get('sala');
     if (qs && !S.session) {
