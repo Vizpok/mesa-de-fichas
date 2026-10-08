@@ -32,6 +32,10 @@ function client() {
   };
   return c;
 }
+function E_canCheck(c) {
+  const h = c.state.snap.hand;
+  return h.currentBet === (h.bets[c.state.you.playerId] || 0);
+}
 function get(p) {
   return new Promise((res, rej) => {
     http.get({ host: 'localhost', port: PORT, path: p }, r => {
@@ -234,6 +238,47 @@ function get(p) {
     await c2.until(c => c.errs.length);
     assert(/host/i.test(c2.errs[0].error));
     c2.ws.close();
+  });
+
+  console.log('Servidor — cartas virtuales');
+  await t('cada celular recibe sólo sus cartas y nadie ve el mazo ni las de otros', async () => {
+    const a = client(); await a.open;
+    a.send({ t: 'create', name: 'Ana', emoji: '🙂', settings: { cards: 'virtual' } });
+    await a.until(c => c.hello && c.state);
+    assert.strictEqual(a.state.snap.settings.cards, 'virtual');
+    const b = client(); await b.open;
+    b.send({ t: 'join', code: a.hello.code, name: 'Beto' });
+    await b.until(c => c.hello && c.state);
+    const spectator = client(); await spectator.open;
+    spectator.send({ t: 'join', code: a.hello.code });
+    await spectator.until(c => c.hello && c.state);
+    a.cmd({ c: 'start' });
+    await a.until(c => c.state.snap.phase === 'betting' && c.state.you.hole);
+    await b.until(c => c.state.snap.phase === 'betting' && c.state.you.hole);
+    const ha = a.state.you.hole, hb = b.state.you.hole;
+    assert.strictEqual(ha.length, 2); assert.strictEqual(hb.length, 2);
+    assert.strictEqual(new Set(ha.concat(hb)).size, 4);
+    assert(!spectator.state.you.hole, 'el espectador no ve cartas');
+    [a, b, spectator].forEach(c => {
+      const txt = JSON.stringify(c.state.snap);
+      assert(!txt.includes('secret') && !txt.includes('holes'));
+    });
+    const bTxt = JSON.stringify(b.state);
+    ha.forEach(card => assert(!bTxt.includes('"' + card + '"'), 'Beto vio una carta de Ana'));
+    // juegan hasta el showdown: se reparte solo y se muestran las manos
+    let g = 0;
+    while (a.state.snap.phase === 'betting' && g++ < 12) {
+      const turn = a.state.snap.hand.toAct;
+      const who = turn === a.state.you.playerId ? a : b;
+      who.cmd({ c: 'act', type: E_canCheck(who) ? 'check' : 'call' });
+      await sleep(40);
+    }
+    await a.until(c => c.state.snap.phase === 'between', 3000);
+    const hand = a.state.snap.hand;
+    assert.strictEqual(hand.board.length, 5);
+    assert.deepStrictEqual(Object.keys(hand.shown).sort(), [a.state.you.playerId, b.state.you.playerId].sort());
+    assert(hand.result.pots[0].winners.length >= 1);
+    [a, b, spectator].forEach(c => c.ws.close());
   });
 
   console.log('\n' + pass + ' pasaron, ' + fail + ' fallaron');

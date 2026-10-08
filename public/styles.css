@@ -145,13 +145,13 @@ h1, h2, h3, p { margin: 0; }
 
 /* ---------- Juego ---------- */
 .game { max-width: 560px; margin: 0 auto; height: 100dvh; display: flex; flex-direction: column; }
-.top { display: flex; align-items: center; gap: 10px; padding: calc(var(--safe-t) + 10px) 16px 8px; }
+.top { display: flex; align-items: center; gap: 8px; padding: calc(var(--safe-t) + 10px) 16px 8px; }
 .plate {
   font: 900 1.7rem/1 var(--display); letter-spacing: .16em; padding: 6px 10px 6px calc(10px + .16em); border-radius: 9px;
   background: var(--felt-1); border: 1.5px solid var(--rule); color: var(--text);
 }
 .plate.local { letter-spacing: .04em; font-size: 1.2rem; padding-left: 10px; }
-.top .grow { flex: 1; min-width: 0; font-size: .95rem; font-weight: 600; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .grow { flex: 1 0 auto; min-width: 0; font-size: .95rem; font-weight: 600; color: var(--dim); white-space: nowrap; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); flex: none; }
 .dot.off { background: var(--brick); }
 .iconbtn { background: var(--felt-1); border: 1.5px solid var(--rule); border-radius: 11px; min-width: 44px; min-height: 40px; padding: 0 12px; font-weight: 700; }
@@ -312,3 +312,75 @@ input[type=range] { flex: 1; height: 44px; accent-color: var(--brass); backgroun
 .tiebar { display: flex; align-items: baseline; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .tiebar .link { padding: 6px 0; }
 .tiebar .tip { margin: 0; color: var(--text); font-weight: 600; font-size: .9rem; }
+
+/* ---------- Cartas ---------- */
+.pc {
+  --cw: 54px; flex: none; position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  width: var(--cw); aspect-ratio: 5 / 7; border-radius: calc(var(--cw) * .13); background: #f4efe2; color: #17231f;
+  box-shadow: inset 0 0 0 1px #0000001f, 0 3px 8px #0008; font-family: var(--display); line-height: 1; user-select: none; -webkit-user-select: none;
+}
+.pc b { font-weight: 900; font-size: calc(var(--cw) * .52); letter-spacing: -.01em; }
+.pc i { font-style: normal; font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Apple Symbols", var(--ui), sans-serif; font-size: calc(var(--cw) * .46); margin-top: calc(var(--cw) * -.03); }
+.pc.red { color: #b9302a; }
+.pc.lg { --cw: 78px; }
+.pc.md { --cw: clamp(40px, 15.4vw, 58px); }
+.pc.sm { --cw: 36px; border-radius: 5px; box-shadow: inset 0 0 0 1px #0000001f, 0 2px 4px #0007; }
+.pc.dim { opacity: .38; }
+.pc.hl { outline: 2px solid var(--brass); outline-offset: 2px; }
+.pc.back {
+  background: repeating-linear-gradient(45deg, var(--felt-2) 0 4px, var(--felt-1) 4px 8px);
+  box-shadow: inset 0 0 0 calc(var(--cw) * .07) var(--felt-0), inset 0 0 0 calc(var(--cw) * .1) var(--brass), 0 3px 8px #0008;
+}
+.pc.slot { background: transparent; box-shadow: none; border: 1.5px dashed var(--rule); }
+.boardrow { display: flex; justify-content: center; gap: 6px; margin: 16px 0 2px; }
+
+.mycards { margin: 12px 0 0; text-align: center; }
+.holes { position: relative; display: inline-flex; gap: 12px; padding: 6px; border-radius: 14px; }
+.holes .cover { position: absolute; inset: 0; display: flex; gap: 12px; padding: 6px; justify-content: center; transition: opacity .1s; }
+.holes.hidden:active .cover { opacity: 0; }
+.holeinfo { margin-top: 8px; display: flex; flex-direction: column; align-items: center; gap: 0; }
+.holeinfo b { font: 900 1.7rem/1.05 var(--display); letter-spacing: .01em; }
+.mycards .link { margin-top: 2px; }
+
+.seat .sc { grid-column: 2 / 4; display: flex; gap: 4px; align-items: center; margin-top: 7px; flex-wrap: wrap; }
+.seat .sc em { font-style: normal; font-weight: 700; font-size: .9rem; color: var(--brass); margin-left: 6px; }
+
+.reveal { margin: 4px 0 6px; }
+.hands { list-style: none; margin: 10px 0 0; padding: 0; }
+.hands li { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--rule); }
+.hands .who { font-weight: 700; }
+.hands .crown { margin-left: 6px; font: 800 .85rem/1 var(--display); letter-spacing: .06em; background: var(--brass); color: var(--brass-ink); padding: 3px 7px 2px; border-radius: 6px; }
+.hands .cs { display: flex; gap: 4px; grid-row: 1 / span 2; grid-column: 2; }
+.hands .nm2 { color: var(--dim); font-size: .92rem; }
+.hands li.win .nm2 { color: var(--brass); font-weight: 700; }
+
+/* ---------- Banner de ronda ---------- */
+.ticker {
+  appearance: none; display: block; width: 100%; overflow: hidden; padding: 0; margin: 0; text-align: left; color: var(--text);
+  background: color-mix(in srgb, var(--brass) 13%, var(--felt-1)); border: 0; border-block: 1.5px solid color-mix(in srgb, var(--brass) 50%, var(--rule));
+}
+.ticker .track { display: inline-flex; white-space: nowrap; padding: 8px 0 7px; animation: tick var(--d, 18s) linear infinite; will-change: transform; }
+.ticker .track span { padding-right: 3.2rem; font-weight: 600; font-size: .98rem; }
+.ticker b { color: var(--brass); font: 800 1.12rem/1 var(--display); letter-spacing: .05em; }
+@keyframes tick { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ticker .track { animation: none; white-space: normal; padding: 8px 16px 7px; }
+  .ticker .track span { padding-right: 0; }
+  .ticker .track span + span { display: none; }
+}
+
+/* ---------- Botón de manos y ayuda ---------- */
+.iconbtn.hands { color: var(--brass); border-color: color-mix(in srgb, var(--brass) 55%, var(--rule)); font-weight: 800; padding: 0 12px; }
+.screen header.bar .hands { margin-left: auto; }
+.homebar { display: flex; justify-content: flex-end; margin: -6px -2px -12px; }
+.hlist, .rounds { list-style: none; margin: 8px 0 0; padding: 0; }
+.hlist li { padding: 12px 0; border-top: 1px solid var(--rule); }
+.hlist .hn { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 8px; }
+.hlist .ord { font: 900 1.25rem/1 var(--display); color: var(--brass); min-width: 1.2em; }
+.hlist .hn b { font: 900 1.4rem/1 var(--display); letter-spacing: .02em; }
+.hlist .hn .dim { flex-basis: 100%; font-size: .88rem; padding-left: calc(1.2em + 10px); }
+.hlist .cs { display: flex; gap: 5px; padding-left: calc(1.2em + 10px); }
+.rounds li { padding: 12px 0; border-top: 1px solid var(--rule); }
+.rounds li b { font: 900 1.3rem/1.1 var(--display); letter-spacing: .02em; color: var(--brass); }
+.rounds li p { margin-top: 4px; color: var(--text); }
+.rounds li em { font-style: normal; font-weight: 700; }

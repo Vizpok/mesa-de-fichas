@@ -74,3 +74,6 @@ Cada vez que se sube un cambio a `main`, GitHub compila el APK solo (pestaña **
 4. El plan gratis de Render duerme el servidor tras un rato sin uso: la primera conexión puede tardar hasta un minuto.
 
 El proyecto de Android se genera en la compilación (carpeta `android-app/`, con Capacitor); no hace falta Android Studio.
+
+### Actualizar la app de Android
+El APK se firma siempre con la misma llave (`android-app/mesa-de-fichas.keystore`) y su `versionCode` sube en cada compilación, así que descargar el APK nuevo se instala encima del anterior sin perder nada. (Es una llave de uso informal, no de Play Store.)

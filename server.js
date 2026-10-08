@@ -63,7 +63,12 @@ function socketCount(room) {
   room.members.forEach(m => { n += m.sockets.size; });
   return n;
 }
-function you(m) { return { playerId: m.playerId, isHost: m.isHost }; }
+// Cada celular recibe sólo sus propias cartas (si la sala usa cartas virtuales)
+function you(m, room) {
+  const o = { playerId: m.playerId, isHost: m.isHost };
+  if (room && m.playerId) { const hole = room.table.holeOf(m.playerId); if (hole) o.hole = hole; }
+  return o;
+}
 
 function send(ws, obj) {
   if (ws.readyState === 1) ws.send(JSON.stringify(obj));
@@ -73,7 +78,7 @@ function broadcast(room) {
   const base = { t: 'state', code: room.code, snap, online: online(room), hostOnline: hostOnline(room), now: Date.now() };
   room.members.forEach(m => {
     if (!m.sockets.size) return;
-    const payload = JSON.stringify(Object.assign({ you: you(m) }, base));
+    const payload = JSON.stringify(Object.assign({ you: you(m, room) }, base));
     m.sockets.forEach(ws => { if (ws.readyState === 1) ws.send(payload); });
   });
   room.dirty = true;
@@ -126,7 +131,7 @@ function attach(ws, room, member) {
   member.sockets.add(ws);
   ws.ctx = { room, member };
   room.lastActive = Date.now();
-  send(ws, { t: 'hello', code: room.code, token: member.token, you: you(member) });
+  send(ws, { t: 'hello', code: room.code, token: member.token, you: you(member, room) });
   broadcast(room);
 }
 function detach(ws) {

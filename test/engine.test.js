@@ -403,5 +403,181 @@ t('runCommand respeta permisos', () => {
   assert(E.runCommand(tb, { c: 'act', type: 'fold', as: tb.hand.toAct }, { isHost: true }).ok);
 });
 
+console.log('\nMotor — cartas virtuales');
+const H = str => E.bestHand(str.split(' '));
+t('evaluador: las 10 categorías con su nombre', () => {
+  const casos = [
+    ['Ah Kh Qh Jh Th', 'Escalera real'], ['9c 8c 7c 6c 5c', 'Escalera de color'], ['As Ad Ah Ac 8c', 'Póker'],
+    ['Kc Kh Kd 4s 4c', 'Full'], ['Qc 8c 6c 4c 3c', 'Color'], ['9c 8d 7h 6s 5c', 'Escalera'], ['Jc Jd Jh 5s 2c', 'Trío'],
+    ['6c 6h As Ad Kc', 'Doble par'], ['Ah Ad 2c 5s 7d', 'Un par'], ['Kh 9s 6d 4c 3h', 'Carta alta']];
+  casos.forEach(([c, n]) => assert.strictEqual(H(c).name, n, c));
+});
+t('evaluador: la rueda A-2-3-4-5 es escalera baja y pierde contra 2-6', () => {
+  assert.strictEqual(H('Ac 2d 3h 4s 5c').name, 'Escalera');
+  assert(H('2c 3d 4h 5s 6c').score > H('Ac 2d 3h 4s 5c').score);
+  assert.strictEqual(H('Ac 2d 3h 4s 6c').name, 'Carta alta');
+});
+t('evaluador: ordena categorías, kickers y empates', () => {
+  assert(H('As As Ah Ac 2c'.replace('As As', 'As Ad')).score > H('Kc Kh Kd Ks 2c').score);
+  assert(H('Ac Kc 9d 5s 3h').score > H('Qc Jc 9d 5s 3h').score);
+  assert(H('Ah Ad Kc 5s 3h').score > H('Ac Ad Qc 5s 3h').score, 'mejor kicker');
+  assert.strictEqual(H('Ah Kd Qc Js 9h').score, H('As Kc Qh Jd 9c').score, 'empate exacto');
+  assert(H('7c 7d 7h Kc Kd').score > H('6c 6d 6h Ac Ad').score);
+});
+t('evaluador: con 7 cartas toma la mejor combinación de 5', () => {
+  assert.strictEqual(H('Ah Kh Qh Jh Th 2c 3d').name, 'Escalera real');
+  assert.strictEqual(H('2c 2d 9h 9s Ac Kd 3h').text, 'Doble par de 9 y 2');
+  assert.strictEqual(H('Ah Ad Ac Kc Kd Ks 2c').text, 'Full de A con K');
+  assert.strictEqual(H('Ac 2c 3c 4c 9c Kd 5d').name, 'Color');
+  assert.strictEqual(H('Ac 2d 3c 4c 5h Kd Kc').name, 'Escalera');
+  assert.strictEqual(H('Ac 2d 3c 4c 5h Kd Kc').best.length, 5);
+});
+t('evaluador: con 2 a 4 cartas sólo reporta pares, tríos y póker', () => {
+  assert.strictEqual(H('As Ad').text, 'Par de A');
+  assert.strictEqual(H('Kc Qd').text, 'Carta alta K');
+  assert.strictEqual(H('7c 7d 7h').name, 'Trío');
+  assert.strictEqual(H('As Ad Kc Kd').name, 'Doble par');
+});
+t('mazo: 52 cartas distintas, sin jokers, y barajar no pierde ni repite', () => {
+  const d = E.makeDeck();
+  assert.strictEqual(d.length, 52); assert.strictEqual(new Set(d).size, 52);
+  assert(d.every(c => /^[2-9TJQKA][cdhs]$/.test(c)));
+  const m = E.shuffle(d.slice());
+  assert.deepStrictEqual(m.slice().sort(), d.slice().sort());
+  assert.notDeepStrictEqual(m, d);
+});
+
+const V = (names, extra) => mk(names, Object.assign({ cards: 'virtual' }, extra || {}));
+// Fija las cartas de una mano virtual: holes = { id: 'As Kd' }, board = 'a b c d e'
+function rig(tb, holes, board) {
+  Object.keys(holes).forEach(id => { tb.secret.holes[id] = holes[id].split(' '); });
+  tb.secret.board = board.split(' ');
+}
+t('cartas virtuales: ajuste válido y rechaza valores raros', () => {
+  const tb = new E.Table();
+  assert.strictEqual(tb.settings.cards, 'physical');
+  assert(tb.setSettings({ cards: 'virtual' }).ok);
+  assert(!tb.setSettings({ cards: 'holograma' }).ok);
+});
+t('cartas virtuales: cada jugador recibe 2 cartas y hay 5 en el tablero, todas distintas', () => {
+  const tb = V(['A', 'B', 'C', 'D']);
+  assert(tb.startHand().ok);
+  const all = [];
+  ['A', 'B', 'C', 'D'].forEach(id => { const c = tb.holeOf(id); assert.strictEqual(c.length, 2); all.push(...c); });
+  all.push(...tb.secret.board);
+  assert.strictEqual(all.length, 13); assert.strictEqual(new Set(all).size, 13);
+  assert.deepStrictEqual(tb.hand.board, []);
+});
+t('cartas virtuales: el estado público no filtra cartas ocultas', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  const json = JSON.stringify(tb.snapshot());
+  assert(!json.includes('secret') && !json.includes('holes'));
+  tb.holeOf('A').concat(tb.secret.board).forEach(c => assert(!json.includes('"' + c + '"'), 'filtró ' + c));
+  assert.strictEqual(tb.holeOf('Z'), null);
+});
+t('cartas virtuales: las cartas comunes se descubren por ronda (3, 4, 5)', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  rig(tb, { A: '2c 7d', B: '3c 8d' }, 'Ks Qs Js 9h 4d');
+  const h = tb.hand;
+  const callCheck = () => { const first = h.toAct, second = h.order.find(x => x !== first); act(tb, first, tb.legal ? 'check' : (E.legal(tb, first).canCheck ? 'check' : 'call')); act(tb, second, 'check'); };
+  act(tb, h.toAct, 'call'); act(tb, h.toAct, 'check');
+  assert.strictEqual(h.street, 1); assert.deepStrictEqual(h.board, ['Ks', 'Qs', 'Js']);
+  act(tb, h.toAct, 'check'); act(tb, h.toAct, 'check');
+  assert.strictEqual(h.street, 2); assert.deepStrictEqual(h.board, ['Ks', 'Qs', 'Js', '9h']);
+  act(tb, h.toAct, 'check'); act(tb, h.toAct, 'check');
+  assert.strictEqual(h.street, 3); assert.strictEqual(h.board.length, 5);
+});
+t('cartas virtuales: showdown automático da el bote al mejor y muestra las manos', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  rig(tb, { A: 'Ah Ad', B: 'Kc Kd' }, '2s 7h 9c Jd 3s');
+  const h = tb.hand;
+  act(tb, h.toAct, 'call'); act(tb, h.toAct, 'check');
+  for (let i = 0; i < 6; i++) act(tb, h.toAct, 'check');
+  assert.strictEqual(tb.phase, 'between');
+  assert.strictEqual(stack(tb, 'A'), 1020); assert.strictEqual(stack(tb, 'B'), 980);
+  assert.deepStrictEqual(h.shown.A, ['Ah', 'Ad']);
+  assert.strictEqual(h.info.A.name, 'Un par'); assert.strictEqual(h.info.B.name, 'Un par');
+  assert.deepStrictEqual(h.result.pots[0].winners, ['A']);
+  assert.strictEqual(h.board.length, 5);
+});
+t('cartas virtuales: empate exacto reparte el bote', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  rig(tb, { A: '2c 3d', B: '2h 3s' }, 'Ah Ad Ks Kd 9c');
+  act(tb, tb.hand.toAct, 'call'); act(tb, tb.hand.toAct, 'check');
+  for (let i = 0; i < 6; i++) act(tb, tb.hand.toAct, 'check');
+  assert.strictEqual(stack(tb, 'A'), 1000); assert.strictEqual(stack(tb, 'B'), 1000);
+  assert.strictEqual(tb.hand.result.pots[0].winners.length, 2);
+});
+t('cartas virtuales: all-in preflop descubre las 5 y resuelve botes laterales', () => {
+  const tb = V(['A', 'B', 'C'], { startStack: 1000 });
+  tb.setStack('C', 300);
+  assert(tb.startHand().ok);
+  const h = tb.hand;
+  rig(tb, { A: 'Ac Ad', B: 'Kc Kd', C: 'Qc Qd' }, '2s 7h 9c Jd 3s');
+  // C (con menos fichas) mete todo, A y B igualan todo: bote principal 900 y lateral 1400
+  let guard = 0;
+  while (tb.phase === 'betting' && guard++ < 20) act(tb, h.toAct, 'allin');
+  assert.strictEqual(tb.phase, 'between');
+  assert.strictEqual(h.board.length, 5);
+  assert.strictEqual(stack(tb, 'A'), 2300); assert.strictEqual(stack(tb, 'B'), 0); assert.strictEqual(stack(tb, 'C'), 0);
+  assert.strictEqual(tb.players.reduce((a, p) => a + p.stack, 0), 2300);
+});
+t('cartas virtuales: un bote lateral lo gana el mejor entre los que entraron', () => {
+  const tb = V(['A', 'B', 'C']);
+  tb.setStack('C', 300);
+  tb.startHand();
+  const h = tb.hand;
+  rig(tb, { A: '2c 3d', B: 'Kc Kd', C: 'Ac Ad' }, '5s 7h 9c Jd 8s');
+  let g = 0;
+  while (tb.phase === 'betting' && g++ < 20) act(tb, h.toAct, 'allin');
+  // C gana el principal (900); B gana el lateral (1400); A no gana nada
+  assert.strictEqual(stack(tb, 'C'), 900); assert.strictEqual(stack(tb, 'B'), 1400); assert.strictEqual(stack(tb, 'A'), 0);
+});
+t('cartas virtuales: si todos se retiran nadie muestra sus cartas', () => {
+  const tb = V(['A', 'B', 'C']);
+  tb.startHand();
+  const h = tb.hand;
+  act(tb, h.toAct, 'fold'); act(tb, h.toAct, 'fold');
+  assert.strictEqual(tb.phase, 'between');
+  assert.deepStrictEqual(h.shown, {});
+  assert(h.result.uncontested);
+});
+t('cartas virtuales: deshacer conserva las mismas cartas', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  const a = tb.holeOf('A'), board = tb.secret.board.slice();
+  act(tb, tb.hand.toAct, 'call');
+  assert(tb.undo().ok);
+  assert.deepStrictEqual(tb.holeOf('A'), a); assert.deepStrictEqual(tb.secret.board, board);
+});
+t('cartas virtuales: cada mano reparte cartas nuevas y con cartas físicas no hay mazo', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  const first = tb.holeOf('A').join();
+  act(tb, tb.hand.toAct, 'fold');
+  tb.startHand();
+  assert.notStrictEqual(tb.secret, null);
+  assert.strictEqual(tb.hand.board.length, 0);
+  const fis = mk(['A', 'B']);
+  fis.startHand();
+  assert.strictEqual(fis.holeOf('A'), null); assert.strictEqual(fis.secret, null);
+  assert.strictEqual(typeof first, 'string');
+});
+t('cartas virtuales: el ajuste no cambia a mitad de una mano', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  assert(!tb.setSettings({ cards: 'physical' }).ok);
+});
+t('cartas virtuales: se conservan al guardar y restaurar la mesa', () => {
+  const tb = V(['A', 'B']);
+  tb.startHand();
+  const copy = new E.Table(tb._plain(true));
+  assert.deepStrictEqual(copy.holeOf('A'), tb.holeOf('A'));
+});
+
 console.log('\n' + pass + ' pasaron, ' + fail + ' fallaron');
 process.exit(fail ? 1 : 0);

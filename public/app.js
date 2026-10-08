@@ -50,7 +50,7 @@
   const S = {
     screen: 'home', mode: null, snap: null, you: { playerId: null, isHost: false },
     online: [], hostOnline: true, code: null, tab: 'hand', skew: 0, conn: 'off',
-    session: lsGet('mf.session', null), profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
+    session: lsGet('mf.session', null), hide: !!lsGet('mf.hide', false), profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
     form: {}, sheet: null, picks: {}, ties: {}, actFor: null, error: null, canReclaim: false, busy: false, okMsg: null
   };
   let LT = null; // mesa local
@@ -152,6 +152,7 @@
       const top = main ? main.scrollTop : 0;
       $app.innerHTML = html;
       lastApp = html;
+      syncTicker();
       const nm = $app.querySelector('.main');
       if (nm && top) nm.scrollTop = top;
     }
@@ -188,6 +189,54 @@
     }
   }
 
+  /* ---------- Cartas (sólo en salas con cartas virtuales) ---------- */
+  const SUIT_GLYPH = { c: '\u2663\uFE0E', d: '\u2666\uFE0E', h: '\u2665\uFE0E', s: '\u2660\uFE0E' };
+  const SUIT_NAME = { c: 'tréboles', d: 'diamantes', h: 'corazones', s: 'picas' };
+  const RANK_NAME = { A: 'As', K: 'Rey', Q: 'Reina', J: 'Jota', T: '10' };
+  const cardName = c => (RANK_NAME[c.charAt(0)] || c.charAt(0)) + ' de ' + SUIT_NAME[c.charAt(1)];
+  function cardHTML(c, cls) {
+    const red = c.charAt(1) === 'h' || c.charAt(1) === 'd';
+    return `<span class="pc${red ? ' red' : ''}${cls ? ' ' + cls : ''}" role="img" aria-label="${esc(cardName(c))}"><b>${c.charAt(0) === 'T' ? '10' : c.charAt(0)}</b><i>${SUIT_GLYPH[c.charAt(1)]}</i></span>`;
+  }
+  const backHTML = cls => `<span class="pc back${cls ? ' ' + cls : ''}" aria-hidden="true"></span>`;
+  const cardsMode = () => !!(S.snap && !isLocal() && S.snap.settings.cards === 'virtual');
+  const boardOf = () => (S.snap && S.snap.hand && S.snap.hand.board) || [];
+  function boardHTML() {
+    const b = boardOf();
+    let out = '';
+    for (let i = 0; i < 5; i++) out += b[i] ? cardHTML(b[i], 'md') : '<span class="pc slot md" aria-hidden="true"></span>';
+    return `<div class="boardrow" role="group" aria-label="Cartas en la mesa: ${b.length ? esc(b.map(cardName).join(', ')) : 'todavía ninguna'}">${out}</div>`;
+  }
+
+  /* Qué se hace en cada ronda (texto del banner y de la ayuda) */
+  const ROUND_TIPS = [
+    { n: 'Preflop', phys: 'Cada quien tiene sus 2 cartas tapadas y todavía no hay cartas en el centro. Se ponen las ciegas y se hace la primera vuelta de apuestas.', virt: 'Cada celular recibe sus 2 cartas y todavía no hay cartas en el centro. Se ponen las ciegas y se hace la primera vuelta de apuestas.' },
+    { n: 'Flop', phys: 'Se voltean las 3 primeras cartas del centro. Segunda vuelta de apuestas.', virt: 'La app descubre las 3 primeras cartas del centro. Segunda vuelta de apuestas.' },
+    { n: 'Turn', phys: 'Se voltea la 4.ª carta del centro. Tercera vuelta de apuestas.', virt: 'La app descubre la 4.ª carta del centro. Tercera vuelta de apuestas.' },
+    { n: 'River', phys: 'Se voltea la 5.ª y última carta del centro. Cuarta y última vuelta de apuestas.', virt: 'La app descubre la 5.ª y última carta del centro. Cuarta y última vuelta de apuestas.' }
+  ];
+  function tickerText() {
+    const s = S.snap;
+    if (!s || !s.hand) return '';
+    const v = cardsMode(), h = s.hand;
+    if (s.phase === 'betting') { const r = ROUND_TIPS[h.street]; return [`Ronda ${h.street + 1} de 4 · ${r.n}`, v ? r.virt : r.phys]; }
+    if (s.phase === 'showdown') return ['Showdown', 'Se acabaron las apuestas. Muestren sus cartas: gana la mejor mano de 5 cartas.'];
+    if (s.phase === 'between') return ['Mano terminada', v ? 'Pulsa «Siguiente mano» y la app reparte 2 cartas nuevas a cada celular.' : 'Baraja y reparte 2 cartas tapadas a cada jugador para la siguiente mano.'];
+    return '';
+  }
+  function tickerHTML() {
+    const t = tickerText();
+    if (!t) return '';
+    const dur = Math.max(14, Math.round((t[0].length + t[1].length) * 0.2));
+    const span = `<span><b>${esc(t[0])}</b> — ${esc(t[1])}</span>`;
+    return `<button class="ticker" type="button" data-a="openRounds" aria-label="${esc(t[0] + '. ' + t[1])} Toca para ver cómo se juega cada ronda."><span class="track" data-d="${dur}" style="--d:${dur}s" aria-hidden="true">${span}${span}</span></button>`;
+  }
+  /* Mantiene el banner corriendo sin saltos cuando la pantalla se vuelve a dibujar */
+  function syncTicker() {
+    const tr = document.querySelector('.ticker .track');
+    if (tr) tr.style.animationDelay = '-' + ((Date.now() / 1000) % (Number(tr.dataset.d) || 18)).toFixed(2) + 's';
+  }
+
   /* ---------- Fichas ---------- */
   const chipLabel = d => (d >= 1000 ? (d / 1000) + 'K' : String(d));
   function pileHTML(d, n) {
@@ -215,7 +264,15 @@
     NUM_KEYS.forEach(k => { S.form['s_' + k] = String(b[k]); });
     S.form.s_rebuy = !!b.rebuy;
     S.form.s_winnerPicker = b.winnerPicker;
+    S.form.s_cards = b.cards === 'virtual' ? 'virtual' : 'physical';
     S.form.s_preset = preset || null;
+  }
+  function cardsFieldHTML(disabled) {
+    const v = S.form.s_cards === 'virtual';
+    return `<div class="field"><div class="lab">Cartas</div><div class="seg" role="group" aria-label="Tipo de cartas">
+      <button type="button" data-a="setopt" data-k="s_cards" data-v="physical" aria-pressed="${!v}"${disabled ? ' disabled' : ''}>Físicas</button>
+      <button type="button" data-a="setopt" data-k="s_cards" data-v="virtual" aria-pressed="${v}"${disabled ? ' disabled' : ''}>Virtuales</button></div>
+      <div class="hint">${v ? 'La app baraja una baraja inglesa de 52 cartas (sin jokers), reparte 2 a cada celular, descubre las cartas del centro y decide al ganador. Cada quien sólo ve las suyas.' : 'Juegan con una baraja de verdad. La app lleva las fichas, los turnos y las apuestas, y el dealer dice quién ganó.'}${disabled ? ' Se cambia entre manos.' : ''}</div></div>`;
   }
   function settingsFieldsHTML(mode) {
     const inHand = mode === 'edit' && live();
@@ -234,15 +291,16 @@
     out += `<div class="field"><div class="switch"><span class="lab" style="margin:0">Permitir recompra al quedarse sin fichas</span><button type="button" data-a="setopt" data-k="s_rebuy" data-v="${!S.form.s_rebuy}" aria-pressed="${!!S.form.s_rebuy}" aria-label="Recompra"></button></div></div>`;
     if (S.form.s_rebuy) out += numField('s_rebuyAmount', 'Fichas por recompra', '');
     out += numField('s_turnSeconds', 'Tiempo por turno', 'segundos. 0 = sin reloj. Si se acaba, pasa o se retira solo.');
-    out += `<div class="field"><div class="lab">Quién reporta al ganador</div><div class="seg" role="group" aria-label="Quién reporta al ganador">
+    if (S.form.s_cards !== 'virtual') out += `<div class="field"><div class="lab">Quién reporta al ganador</div><div class="seg" role="group" aria-label="Quién reporta al ganador">
       <button type="button" data-a="setopt" data-k="s_winnerPicker" data-v="dealer" aria-pressed="${S.form.s_winnerPicker === 'dealer'}">El dealer</button>
       <button type="button" data-a="setopt" data-k="s_winnerPicker" data-v="host" aria-pressed="${S.form.s_winnerPicker === 'host'}">Sólo el host</button></div>
       <div class="hint">El dealer es quien tiene el botón en esa mano. El host siempre puede hacerlo también.</div></div>`;
     return out;
   }
-  function settingsPatch(edit) {
+  function settingsPatch(edit, withCards) {
     const inHand = edit && live();
     const p = {};
+    if (withCards && !inHand) p.cards = S.form.s_cards === 'virtual' ? 'virtual' : 'physical';
     NUM_KEYS.forEach(k => { if (!inHand || ALWAYS.indexOf(k) >= 0) p[k] = readNum('s_' + k, E.DEFAULTS[k]); });
     p.rebuy = !!S.form.s_rebuy;
     p.winnerPicker = S.form.s_winnerPicker;
@@ -259,6 +317,7 @@
       resume += `<button class="entry primary" data-a="resumeLocal"><div><b>Continuar partida local</b><span>${n} jugadores, mano ${loc.plain.handNo}</span></div><span class="go">›</span></button>`;
     }
     return `<div class="screen">
+      <div class="homebar">${handsBtn}</div>
       <div class="hero">
         <h1 class="wordmark">Mesa<br>de fichas</h1>
         <p class="tagline">Las cartas se juegan en la mesa. Las apuestas se llevan aquí, con puntos ficticios.</p>
@@ -274,7 +333,8 @@
       <p class="fine">Sólo se cuentan puntos ficticios. La app no reparte cartas ni mueve dinero.</p>
     </div>`;
   }
-  const barHTML = title => `<header class="bar"><button class="back" data-a="home" aria-label="Volver">‹</button><h2>${title}</h2></header>`;
+  const handsBtn = '<button class="iconbtn hands" type="button" data-a="openHands" aria-label="Ver las manos del poker, de mejor a peor">Manos</button>';
+  const barHTML = title => `<header class="bar"><button class="back" data-a="home" aria-label="Volver">‹</button><h2>${title}</h2>${handsBtn}</header>`;
 
   function createHTML() {
     return `<div class="screen">${barHTML('Crear sala')}
@@ -283,6 +343,7 @@
           <div class="hint">${S.form.seat ? 'Te sientas a la mesa con tu alias.' : 'Sólo administras: agregas jugadores y llevas la mesa sin jugar.'}</div></div>
         ${S.form.seat ? `<div class="field"><label for="f_name">Tu alias</label><input class="input" id="f_name" data-f="name" maxlength="14" autocomplete="off" value="${val('name')}" placeholder="Cómo te ven en la mesa"></div>
         <div class="field"><div class="lab">Tu ícono</div>${emojiPicker(S.form.emoji)}</div>` : ''}
+        <div class="group"><h3>Cartas</h3>${cardsFieldHTML(false)}</div>
         <div class="group"><h3>Configuración</h3>${settingsFieldsHTML('new')}</div>
         ${S.error ? `<div class="err" role="alert">${esc(S.error)}</div>` : ''}
         <button class="btn brass xl wide" type="submit" data-a="submitCreate"${S.busy ? ' disabled' : ''}>${S.busy ? 'Creando…' : 'Crear sala'}</button>
@@ -338,7 +399,7 @@
       banner = '<div class="banner" role="status">El host se desconectó. <button class="link" data-a="claimHost">Tomar el mando</button></div>';
     const tabs = tabsHTML();
     const body = S.tab === 'table' ? tableHTML() : handHTML();
-    return `<div class="game">${topHTML()}${banner}<main class="main">${body}</main>${tabs}</div>`;
+    return `<div class="game">${topHTML()}${banner}${tickerHTML()}<main class="main">${body}</main>${tabs}</div>`;
   }
   function headline() {
     const s = S.snap;
@@ -348,11 +409,11 @@
   }
   function topHTML() {
     const plate = isLocal()
-      ? '<span class="plate local">Partida local</span>'
+      ? '<span class="plate local">Local</span>'
       : `<button class="plate" data-a="share" aria-label="Sala ${esc(S.code)}. Toca para compartir">${esc(S.code)}</button>`;
     const undo = (S.snap.canUndo && canManage() && S.snap.phase !== 'ended') ? '<button class="iconbtn" data-a="undo" aria-label="Deshacer la última acción">Deshacer</button>' : '';
     const dot = isLocal() ? '' : `<span class="dot${S.conn === 'on' ? '' : ' off'}" role="img" aria-label="${S.conn === 'on' ? 'Conectado' : 'Sin conexión'}"></span>`;
-    return `<header class="top">${plate}<div class="grow">${esc(headline())}</div>${undo}${dot}</header>`;
+    return `<header class="top">${plate}<div class="grow">${esc(headline())}</div>${undo}${handsBtn}${dot}</header>`;
   }
   function tabsHTML() {
     const first = isLocal() ? 'Turno' : (S.you.playerId ? 'Mi mano' : (S.you.isHost ? 'Control' : 'Sentarme'));
@@ -388,6 +449,18 @@
     return 'Listo';
   }
 
+  function seatCardsHTML(p, inH) {
+    if (!cardsMode() || !inH) return '';
+    const h = S.snap.hand;
+    if (h.folded[p.id]) return '';
+    const shown = h.shown && h.shown[p.id];
+    if (shown) {
+      const best = (h.info && h.info[p.id] && h.info[p.id].best) || [];
+      return `<span class="sc">${shown.map(c => cardHTML(c, 'sm' + (best.indexOf(c) >= 0 ? ' hl' : ''))).join('')}${h.info && h.info[p.id] ? `<em>${esc(h.info[p.id].text)}</em>` : ''}</span>`;
+    }
+    if (S.snap.phase === 'between') return '';
+    return `<span class="sc">${backHTML('sm')}${backHTML('sm')}</span>`;
+  }
   function seatsHTML() {
     const s = S.snap, h = s.hand;
     return '<ol class="seats">' + s.players.map(p => {
@@ -399,7 +472,7 @@
         <span class="av" aria-hidden="true">${esc(p.emoji)}</span>
         <span class="nm"><span class="t">${esc(p.name)}</span>${tagsHTML(p.id)}${offline ? '<span class="off" title="Sin conexión" role="img" aria-label="Sin conexión"></span>' : ''}</span>
         <span class="stk num">${fmt(p.stack)}</span>
-        <span class="st">${seatStatus(p)}</span></li>`;
+        <span class="st">${seatStatus(p)}</span>${seatCardsHTML(p, inH)}</li>`;
     }).join('') + '</ol>';
   }
 
@@ -413,6 +486,7 @@
       <div class="cur">${h.currentBet > 0 && s.phase === 'betting' ? `Apuesta actual <b class="num" style="font-size:1.3rem">${fmt(h.currentBet)}</b>` : (s.phase === 'showdown' ? 'Muestren sus cartas' : 'Sin apuesta todavía')}</div>
       <div class="cur" style="font-size:.9rem">Ciegas ${fmt(h.sb)}/${fmt(h.bb)}${h.ante ? ', ante ' + fmt(h.ante) : ''}</div>
       <div class="street" aria-label="Ronda: ${E.STREETS[st]}">${E.STREETS.map((n, i) => `<span class="${i === st ? 'on' : (i < st ? 'done' : '')}">${n}</span>`).join('')}</div>
+      ${cardsMode() ? boardHTML() : ''}
       ${multi ? '<div class="sidepots">' + pots.map(p => `<div><span>${esc(p.label)}</span><b>${fmt(p.amount)}</b></div>`).join('') + '</div>' : ''}</div>`;
   }
   function recentHTML() {
@@ -453,6 +527,19 @@
     if (s.phase === 'betting') return pv;
     return phaseHTML() + pv;
   }
+  function holeHTML() {
+    if (!cardsMode()) return '';
+    const hole = S.you.hole, s = S.snap, h = s.hand;
+    if (!hole || !h || (s.phase !== 'betting' && s.phase !== 'showdown' && s.phase !== 'between')) return '';
+    const folded = !!h.folded[S.you.playerId], hid = S.hide;
+    const best = !hid && !folded ? E.bestHand(hole.concat(boardOf())).text : '';
+    const faces = hole.map(c => cardHTML(c, 'lg' + (folded ? ' dim' : ''))).join('');
+    const covers = hole.map(() => backHTML('lg')).join('');
+    return `<div class="mycards">
+      <div class="holes${hid ? ' hidden' : ''}"${hid ? ' tabindex="0" role="img" aria-label="Tus cartas están ocultas. Mantén presionado para verlas."' : ''}>${faces}${hid ? `<div class="cover" aria-hidden="true">${covers}</div>` : ''}</div>
+      <div class="holeinfo">${folded ? '<span class="dim">Te retiraste de esta mano</span>' : (hid ? '<span class="dim">Mantén presionado sobre las cartas para echar un vistazo</span>' : `<span class="dim">Tu mejor mano ahora</span><b>${esc(best)}</b>`)}</div>
+      <button class="link" type="button" data-a="toggleHide">${hid ? 'Mostrar mis cartas' : 'Ocultar mis cartas'}</button></div>`;
+  }
   function personalHTML(pid) {
     const s = S.snap, h = s.hand, p = player(pid);
     if (!p) return '';
@@ -485,7 +572,7 @@
       if (S.you.isHost && !isLocal() && S.online.indexOf(h.toAct) >= 0 && h.toAct !== S.you.playerId)
         act += `<button class="link" data-a="actFor" data-id="${esc(h.toAct)}">Actuar por ${esc(t.name)}</button>`;
     }
-    return `<div class="statusline">${tagsHTML(pid)}${st}</div>
+    return `<div class="statusline">${tagsHTML(pid)}${st}</div>${mine ? holeHTML() : ''}
       <div class="stackcard"><div class="lab">${name}</div><div class="big num">${fmt(p.stack)}</div>${rackHTML(p.stack)}</div>${figs}${extra}${act}`;
   }
   function actionsHTML(pid, compact) {
@@ -527,7 +614,10 @@
       const pots = r.pots.map(p => `<li><span>${esc(p.winners.map(playerName).join(' y '))} ${p.auto ? 'recupera' : (p.winners.length > 1 ? 'se reparten' : 'gana')} ${fmt(p.amount)}${p.label && p.label !== 'Bote' ? ' <span class="dim">(' + esc(p.label) + ')</span>' : ''}</span></li>`).join('');
       const net = Object.keys(r.net).map(id => ({ id: id, n: r.net[id] })).sort((a, b) => b.n - a.n);
       const nets = net.map(x => `<li><span>${esc((h.names[x.id] || {}).name || '?')}</span><span class="${x.n > 0 ? 'pos' : (x.n < 0 ? 'neg' : 'zero')} num">${x.n > 0 ? '+' : ''}${fmt(x.n)}</span></li>`).join('');
-      return `<div class="phase"><h3>Mano ${h.no} terminada</h3><ul class="results">${pots}</ul>
+      const shownIds = cardsMode() && h.shown ? Object.keys(h.shown) : [];
+      const winnerIds = {}; r.pots.forEach(p => { if (!p.auto) p.winners.forEach(w => { winnerIds[w] = true; }); });
+      const reveal = shownIds.length ? `<div class="reveal">${boardHTML()}<ul class="hands">${shownIds.map(id => { const inf = h.info[id] || {}, bst = inf.best || []; return `<li${winnerIds[id] ? ' class="win"' : ''}><span class="who">${esc((h.names[id] || {}).emoji || '')} ${esc(playerName(id))}${winnerIds[id] ? ' <span class="crown">Gana</span>' : ''}</span><span class="cs">${h.shown[id].map(c => cardHTML(c, 'sm' + (bst.indexOf(c) >= 0 ? ' hl' : ''))).join('')}</span><span class="nm2">${esc(inf.text || '')}</span></li>`; }).join('')}</ul></div>` : '';
+      return `<div class="phase"><h3>Mano ${h.no} terminada</h3>${reveal}<ul class="results">${pots}</ul>
         <ul class="results" style="margin-top:6px">${nets}</ul>
         ${mg ? '<button class="btn brass xl wide" data-a="start">Siguiente mano</button>' : `<p style="margin-top:12px">Esperando a que ${s.settings.winnerPicker === 'dealer' ? 'el dealer' : 'el host'} empiece la siguiente mano.</p>`}</div>`;
     }
@@ -569,12 +659,13 @@
 
   function sheetHTML() {
     const sh = S.sheet;
+    if (sh && sh.type === 'hands') return handsSheetHTML();
     if (!sh || !S.snap) return '';
     switch (sh.type) {
       case 'more': return moreHTML();
       case 'log': return logHTML();
       case 'raise': return raiseHTML();
-      case 'settings': return wrap(`<h3 class="title">Ajustes de la partida</h3><form class="form" data-submit="saveSettings" novalidate>${settingsFieldsHTML('edit')}<button class="btn brass xl wide" type="submit" data-a="saveSettings">Guardar ajustes</button></form>`);
+      case 'settings': return wrap(`<h3 class="title">Ajustes de la partida</h3><form class="form" data-submit="saveSettings" novalidate>${!isLocal() ? cardsFieldHTML(live()) : ''}${settingsFieldsHTML('edit')}<button class="btn brass xl wide" type="submit" data-a="saveSettings">Guardar ajustes</button></form>`);
       case 'players': return playersHTML();
       case 'player': return playerHTML();
       case 'confirm': return confirmHTML();
@@ -583,6 +674,39 @@
         ${S.installEvt ? '<button class="btn brass wide" data-a="doInstall">Instalar ahora</button>' : ''}</div>`);
       default: return '';
     }
+  }
+  /* Jerarquía de manos (de mejor a peor) y cómo se juega cada ronda */
+  const HAND_EXAMPLES = [
+    ['Escalera real', '5 seguidas del mismo palo, del 10 al As', 'Ah Kh Qh Jh Th', 5],
+    ['Escalera de color', '5 seguidas del mismo palo', '9s 8s 7s 6s 5s', 5],
+    ['Póker', '4 cartas iguales', 'Qs Qh Qd Qc 4h', 4],
+    ['Full', 'Un trío y un par', 'Jc Jd Jh 6s 6d', 5],
+    ['Color', '5 del mismo palo, no seguidas', 'Kd 9d 7d 4d 2d', 5],
+    ['Escalera', '5 seguidas, de cualquier palo', '9c 8d 7h 6s 5c', 5],
+    ['Trío', '3 cartas iguales', '7h 7d 7c Ks 2d', 3],
+    ['Doble par', 'Dos pares distintos', 'Ah Ad 5c 5s Kd', 4],
+    ['Un par', '2 cartas iguales', 'Td Th 8c 4s 2h', 2],
+    ['Carta alta', 'Ninguna de las anteriores: gana la carta más alta', 'Ah Jd 8c 5s 3h', 1]
+  ];
+  function handsSheetHTML() {
+    const tab = S.sheet.tab === 'rounds' ? 'rounds' : 'rank';
+    const tabs = `<div class="seg" role="group" aria-label="Ayuda"><button type="button" data-a="handsTab" data-k="rank" aria-pressed="${tab === 'rank'}">Manos</button><button type="button" data-a="handsTab" data-k="rounds" aria-pressed="${tab === 'rounds'}">Rondas</button></div>`;
+    let body;
+    if (tab === 'rank') {
+      body = '<p class="dim" style="margin:12px 0 4px">De la mejor a la peor. Se juega con 5 cartas: las 2 tuyas y las 5 del centro, eliges las mejores.</p><ol class="hlist">' + HAND_EXAMPLES.map((x, i) =>
+        `<li><div class="hn"><span class="ord">${i + 1}</span><b>${x[0]}</b><span class="dim">${x[1]}</span></div><div class="cs">${x[2].split(' ').map((c, k) => cardHTML(c, 'sm' + (k < x[3] ? '' : ' dim'))).join('')}</div></li>`).join('') + '</ol><p class="dim" style="margin-top:10px">Si dos jugadores tienen la misma mano, gana la que tenga las cartas más altas. Si empatan del todo, se reparten el bote.</p>';
+    } else {
+      body = `<ol class="rounds">
+        <li><b>Antes de empezar</b><p>El botón (D) marca al dealer y va rotando. Los dos jugadores a su izquierda ponen las ciegas, que son apuestas obligatorias. Cada quien recibe 2 cartas tapadas.</p></li>
+        <li><b>Ronda 1 · Preflop</b><p>Todavía no hay cartas en el centro. Cada quien ve sus 2 cartas y, empezando por quien está a la izquierda de la ciega grande, decide: retirarse, igualar o subir.</p></li>
+        <li><b>Ronda 2 · Flop</b><p>Se voltean 3 cartas al centro. Nueva vuelta de apuestas: ahora se puede pasar si nadie apostó.</p></li>
+        <li><b>Ronda 3 · Turn</b><p>Se voltea la 4.ª carta del centro. Otra vuelta de apuestas.</p></li>
+        <li><b>Ronda 4 · River</b><p>Se voltea la 5.ª y última carta. Última vuelta de apuestas.</p></li>
+        <li><b>Showdown</b><p>Quien siga en la mano muestra sus cartas. Gana la mejor mano de 5 cartas. Si todos menos uno se retiran antes, ese jugador gana sin mostrar nada.</p></li>
+        <li><b>Qué puedes hacer en tu turno</b><p><em>Pasar</em> (no apostar, si nadie ha apostado), <em>Igualar</em> (poner lo que falta), <em>Subir</em> (apostar más), <em>Retirarse</em> (dejas tus fichas en el bote) o <em>All-in</em> (todas tus fichas).</p></li>
+      </ol>`;
+    }
+    return wrap(`<h3 class="title">Ayuda de poker</h3>${tabs}${body}`);
   }
   function moreHTML() {
     const s = S.snap, p = me(), host = S.you.isHost, mg = canManage();
@@ -884,6 +1008,10 @@
     resumeRoom() { S.screen = 'game'; S.mode = 'online'; S.snap = null; openSocket(); render(); },
     resumeLocal() { if (loadLocal()) enterLocal(); else toast('No se encontró la partida guardada', true); },
     emoji(el) { S.form.emoji = el.dataset.e; render(); },
+    openHands() { S.sheet = { type: 'hands', tab: 'rank' }; render(); },
+    openRounds() { S.sheet = { type: 'hands', tab: 'rounds' }; render(); },
+    handsTab(el) { S.sheet = { type: 'hands', tab: el.dataset.k }; render(); },
+    toggleHide() { S.hide = !S.hide; lsSet('mf.hide', S.hide); render(); },
     toggleSeat() { S.form.seat = !S.form.seat; render(); },
     preset(el) { const keep = { r: S.form.s_rebuy, w: S.form.s_winnerPicker }; initSettingsForm(null, el.dataset.k); S.form.s_rebuy = keep.r; S.form.s_winnerPicker = keep.w; render(); },
     setopt(el) {
@@ -896,7 +1024,7 @@
       const seat = !!S.form.seat, name = String(S.form.name || '').trim();
       if (seat && !name) { S.error = 'Escribe un alias para sentarte.'; render(); return; }
       S.error = null; S.busy = true;
-      openSocket({ t: 'create', seat: seat, name: name, emoji: S.form.emoji, settings: settingsPatch(false) });
+      openSocket({ t: 'create', seat: seat, name: name, emoji: S.form.emoji, settings: settingsPatch(false, true) });
       render();
     },
     submitJoin() {
@@ -1014,7 +1142,7 @@
 
     openSettings() { initSettingsForm(S.snap.settings); S.sheet = { type: 'settings' }; render(); },
     saveSettings() {
-      const patch = settingsPatch(true);
+      const patch = settingsPatch(true, !isLocal());
       if (dispatch({ c: 'settings', patch: patch }, 'Ajustes guardados')) { S.sheet = null; render(); }
     },
     openPlayers() { S.form.lname = ''; S.sheet = { type: 'players' }; render(); },
@@ -1096,6 +1224,8 @@
     saveUI();
   });
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; });
+
+  document.addEventListener('touchstart', () => { /* activa :active en iPhone (ver mis cartas con el dedo) */ }, { passive: true });
 
   /* ---------- Inicio ---------- */
   function boot() {

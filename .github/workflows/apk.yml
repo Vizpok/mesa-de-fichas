@@ -39,6 +39,30 @@ jobs:
           grep -q usesCleartextTraffic android/app/src/main/AndroidManifest.xml || \
             sed -i 's#<application#<application android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml
 
+      - name: Firma fija y número de versión
+        working-directory: android-app
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          # Con la misma firma en cada compilación, Android deja actualizar encima
+          # de la app ya instalada. El versionCode sube en cada compilación.
+          cp mesa-de-fichas.keystore android/mesa-de-fichas.keystore
+          sed -i -E "s/versionCode [0-9]+/versionCode ${RUN_NUMBER}/; s/versionName \"[^\"]*\"/versionName \"1.${RUN_NUMBER}\"/" android/app/build.gradle
+          cat >> android/app/build.gradle <<'EOF2'
+
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile file('../mesa-de-fichas.keystore')
+                      storePassword 'mesadefichas'
+                      keyAlias 'mesa'
+                      keyPassword 'mesadefichas'
+                  }
+              }
+          }
+          EOF2
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
       - name: Compilar
         working-directory: android-app/android
         run: |
@@ -60,4 +84,4 @@ jobs:
           gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create apk-latest mesa-de-fichas.apk \
             --title "Mesa de fichas (Android)" \
-            --notes "Descarga mesa-de-fichas.apk en el celular e instálalo. Si Android lo pide, permite instalar apps de este origen. Compilado desde el commit ${GITHUB_SHA::7}."
+            --notes "Descarga mesa-de-fichas.apk en el celular e instálalo (si ya la tenías, se actualiza encima). Si Android lo pide, permite instalar apps de este origen. Compilado desde el commit ${GITHUB_SHA::7}."

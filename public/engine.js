@@ -1,6 +1,7 @@
-/* engine.js — Motor de fichas y apuestas de poker (SIN cartas).
+/* engine.js — Motor de fichas y apuestas de poker.
  * Se comparte entre el servidor (Node) y el navegador (modo "un solo celular").
- * Todo es en puntos ficticios. Las cartas se juegan en físico.
+ * Todo es en puntos ficticios. Por defecto las cartas se juegan en físico; en las salas en línea
+ * se puede elegir "cartas virtuales": el servidor baraja un mazo de 52 (sin jokers), reparte y decide al ganador.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -20,7 +21,8 @@
     rebuy: true,           // permitir recompra cuando te quedas sin fichas
     rebuyAmount: 1000,
     turnSeconds: 0,        // reloj por turno (0 = sin reloj)
-    winnerPicker: 'dealer', // 'dealer' | 'host' (quién reporta al ganador)
+    winnerPicker: 'dealer', // 'dealer' | 'host' (quién reporta al ganador; sólo con cartas físicas)
+    cards: 'physical',     // 'physical' (cartas en la mesa) | 'virtual' (la app reparte y decide)
     maxPlayers: 12
   };
 
@@ -35,6 +37,111 @@
     if (v >= 50) v = Math.round(v / 5) * 5;
     if (v >= 500) v = Math.round(v / 25) * 25;
     return Math.max(v, n + 1);
+  }
+
+  /* ---------- Cartas (mazo de 52, sin jokers) ---------- */
+
+  var RANKS = '23456789TJQKA';
+  var SUITS = 'cdhs'; // tréboles, diamantes, corazones, picas
+  var RANK_LABEL = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+  var HAND_NAMES = ['Carta alta', 'Un par', 'Doble par', 'Trío', 'Escalera', 'Color', 'Full', 'Póker', 'Escalera de color', 'Escalera real'];
+  var nodeCrypto = null;
+  try { if (typeof module === 'object' && module.exports && typeof require === 'function') nodeCrypto = require('crypto'); } catch (e) { nodeCrypto = null; }
+
+  function rndInt(n) {
+    if (nodeCrypto && typeof nodeCrypto.randomInt === 'function') return nodeCrypto.randomInt(n);
+    var g = typeof self !== 'undefined' ? self : null;
+    if (g && g.crypto && g.crypto.getRandomValues) {
+      var max = Math.floor(4294967296 / n) * n, buf = new Uint32Array(1);
+      do { g.crypto.getRandomValues(buf); } while (buf[0] >= max);
+      return buf[0] % n;
+    }
+    return Math.floor(Math.random() * n);
+  }
+  function makeDeck() {
+    var d = [];
+    for (var i = 0; i < RANKS.length; i++) for (var j = 0; j < SUITS.length; j++) d.push(RANKS.charAt(i) + SUITS.charAt(j));
+    return d;
+  }
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) { var j = rndInt(i + 1), t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+  function rv(c) { return RANKS.indexOf(c.charAt(0)); }
+
+  // Evalúa exactamente 5 cartas. El puntaje sirve para comparar: más alto gana.
+  function score5(cs) {
+    var v = cs.map(rv).sort(function (a, b) { return b - a; });
+    var flush = cs.every(function (c) { return c.charAt(1) === cs[0].charAt(1); });
+    var cnt = {};
+    v.forEach(function (x) { cnt[x] = (cnt[x] || 0) + 1; });
+    var g = Object.keys(cnt).map(function (k) { return { r: +k, c: cnt[k] }; })
+      .sort(function (a, b) { return b.c - a.c || b.r - a.r; });
+    var straightHigh = -1;
+    if (g.length === 5) {
+      if (v[0] - v[4] === 4) straightHigh = v[0];
+      else if (v[0] === 12 && v[1] === 3 && v[2] === 2 && v[3] === 1 && v[4] === 0) straightHigh = 3; // A-2-3-4-5
+    }
+    var cat, tb;
+    if (straightHigh >= 0 && flush) { cat = 8; tb = [straightHigh]; }
+    else if (g[0].c === 4) { cat = 7; tb = [g[0].r, g[1].r]; }
+    else if (g[0].c === 3 && g[1].c === 2) { cat = 6; tb = [g[0].r, g[1].r]; }
+    else if (flush) { cat = 5; tb = v; }
+    else if (straightHigh >= 0) { cat = 4; tb = [straightHigh]; }
+    else if (g[0].c === 3) { cat = 3; tb = [g[0].r, g[1].r, g[2].r]; }
+    else if (g[0].c === 2 && g[1].c === 2) { cat = 2; tb = [g[0].r, g[1].r, g[2].r]; }
+    else if (g[0].c === 2) { cat = 1; tb = [g[0].r, g[1].r, g[2].r, g[3].r]; }
+    else { cat = 0; tb = v; }
+    var sc = cat;
+    for (var i = 0; i < 5; i++) sc = sc * 13 + (tb[i] || 0);
+    return { score: sc, cat: cat, tb: tb };
+  }
+  function handText(cat, tb) {
+    var L = function (r) { return RANK_LABEL[r]; };
+    switch (cat) {
+      case 9: return 'Escalera real';
+      case 8: return 'Escalera de color hasta ' + L(tb[0]);
+      case 7: return 'Póker de ' + L(tb[0]);
+      case 6: return 'Full de ' + L(tb[0]) + ' con ' + L(tb[1]);
+      case 5: return 'Color hasta ' + L(tb[0]);
+      case 4: return 'Escalera hasta ' + L(tb[0]);
+      case 3: return 'Trío de ' + L(tb[0]);
+      case 2: return 'Doble par de ' + L(tb[0]) + ' y ' + L(tb[1]);
+      case 1: return 'Par de ' + L(tb[0]);
+      default: return 'Carta alta ' + L(tb[0]);
+    }
+  }
+  // Mejor mano con 2 a 7 cartas (con menos de 5 sólo cuentan pares, tríos y póker).
+  function bestHand(cards) {
+    var best = null, i, j, k, l, m, n = cards.length;
+    if (n >= 5) {
+      var idx = [0, 1, 2, 3, 4];
+      for (;;) {
+        var five = idx.map(function (x) { return cards[x]; });
+        var r = score5(five);
+        if (!best || r.score > best.score) best = { score: r.score, cat: r.cat, tb: r.tb, best: five };
+        var t = 4;
+        while (t >= 0 && idx[t] === n - 5 + t) t--;
+        if (t < 0) break;
+        idx[t]++;
+        for (var u = t + 1; u < 5; u++) idx[u] = idx[u - 1] + 1;
+      }
+    } else {
+      var v = cards.map(rv).sort(function (a, b) { return b - a; }), cnt = {};
+      v.forEach(function (x) { cnt[x] = (cnt[x] || 0) + 1; });
+      var g = Object.keys(cnt).map(function (q) { return { r: +q, c: cnt[q] }; }).sort(function (a, b) { return b.c - a.c || b.r - a.r; });
+      var cat = 0, tb = v;
+      if (g[0].c === 4) { cat = 7; tb = [g[0].r].concat(g.slice(1).map(function (x) { return x.r; })); }
+      else if (g[0].c === 3) { cat = 3; tb = g.map(function (x) { return x.r; }); }
+      else if (g[0].c === 2 && g[1] && g[1].c === 2) { cat = 2; tb = g.map(function (x) { return x.r; }); }
+      else if (g[0].c === 2) { cat = 1; tb = g.map(function (x) { return x.r; }); }
+      var sc = cat;
+      for (i = 0; i < 5; i++) sc = sc * 13 + (tb[i] || 0);
+      var made = cat === 0 ? [cards.slice().sort(function (a, b) { return rv(b) - rv(a); })[0]] : cards.filter(function (c) { return cnt[rv(c)] >= 2; });
+      best = { score: sc, cat: cat, tb: tb, best: made };
+    }
+    var shown = best.cat === 8 && best.tb[0] === 12 ? 9 : best.cat;
+    return { score: best.score, cat: shown, name: HAND_NAMES[shown], text: handText(shown, best.tb), best: best.best };
   }
 
   /* ---------- Cálculo puro (sirve en cliente con el snapshot) ---------- */
@@ -145,8 +252,13 @@
   };
   T.snapshot = function () {
     var o = this._plain(true);
+    delete o.secret; // las cartas ocultas y el resto del mazo nunca salen en el estado público
     o.canUndo = this.hist.length > 0;
     return o;
+  };
+  // Cartas privadas de un jugador (sólo cuando la sala usa cartas virtuales)
+  T.holeOf = function (id) {
+    return (this.secret && id && this.secret.holes[id]) ? this.secret.holes[id].slice() : null;
   };
   T._push = function () {
     this.hist.push(JSON.stringify(this._plain(false)));
@@ -311,6 +423,7 @@
       var v = patch[k];
       if (k === 'rebuy') np[k] = !!v;
       else if (k === 'winnerPicker') { if (v !== 'host' && v !== 'dealer') return err('Valor inválido'); np[k] = v; }
+      else if (k === 'cards') { if (v !== 'physical' && v !== 'virtual') return err('Valor inválido'); np[k] = v; }
       else {
         v = Math.floor(Number(v));
         if (!isFinite(v) || v < 0) return err('Número inválido');
@@ -376,6 +489,8 @@
     });
     this.hand = h;
     this.phase = 'betting';
+    this.secret = null;
+    if (s.cards === 'virtual') this._deal();
     this._log('— Mano #' + h.no + ' · Botón: ' + dealer.name + ' · Ciegas ' + h.sb + '/' + h.bb + ' —');
     if (h.ante > 0) {
       order.forEach(function (id) {
@@ -390,6 +505,19 @@
     var first = this._seek((bbIdx + 1) % n);
     if (first) this._setTurn(first, true); else this._closeRound();
     return ok();
+  };
+
+  T._deal = function () {
+    var h = this.hand, deck = shuffle(makeDeck()), holes = {}, n = 0;
+    h.order.forEach(function (id) { holes[id] = [deck[n++], deck[n++]]; });
+    this.secret = { holes: holes, board: deck.slice(n, n + 5) };
+    h.board = []; h.shown = {}; h.info = {};
+  };
+  // Muestra en la mesa las cartas comunes que ya tocan según la ronda (3, 4 y 5)
+  T._reveal = function () {
+    var h = this.hand;
+    if (!this.secret) return;
+    h.board = this.secret.board.slice(0, [0, 3, 4, 5][h.street]);
   };
 
   T._post = function (id, amt) {
@@ -440,9 +568,11 @@
     var able = live.filter(function (i) { return !h.allIn[i]; });
     if (h.street >= 3 || able.length <= 1) {
       if (h.street < 3) { h.runout = true; h.runoutFrom = h.street; h.street = 3; }
+      this._reveal();
       return this._toShowdown();
     }
     h.street++;
+    this._reveal();
     h.currentBet = 0; h.minRaise = h.bb;
     h.order.forEach(function (i) {
       h.bets[i] = 0; h.acted[i] = false;
@@ -458,8 +588,35 @@
     h.pots = computePots(h);
     this.phase = 'showdown';
     this._log('▸ Showdown · Bote ' + sum(h.total));
+    if (this.secret) return this._autoShowdown();
     if (h.pots.every(function (p) { return p.eligible.length === 1; }))
       this._distribute(h.pots.map(function (p) { return p.eligible.slice(); }));
+  };
+
+  // Cartas virtuales: se muestran las manos, se comparan y se reparte cada bote sin intervención
+  T._autoShowdown = function () {
+    var h = this.hand, sec = this.secret, self = this, info = {};
+    h.board = sec.board.slice();
+    var contested = h.pots.some(function (p) { return p.eligible.length > 1; });
+    if (contested) {
+      h.order.filter(function (id) { return !h.folded[id]; }).forEach(function (id) {
+        var bh = bestHand(sec.holes[id].concat(sec.board));
+        info[id] = bh;
+        h.shown[id] = sec.holes[id].slice();
+        h.info[id] = { name: bh.name, text: bh.text, cat: bh.cat, best: bh.best };
+        self._log(self._name(id) + ' muestra: ' + bh.text);
+      });
+    }
+    var picks = h.pots.map(function (pot) {
+      if (pot.eligible.length === 1) return pot.eligible.slice();
+      var top = -1, w = [];
+      pot.eligible.forEach(function (id) {
+        var sc = info[id].score;
+        if (sc > top) { top = sc; w = [id]; } else if (sc === top) w.push(id);
+      });
+      return w;
+    });
+    this._distribute(picks);
   };
 
   T.act = function (id, type, amount) {
@@ -649,6 +806,7 @@
   return {
     Table: Table, runCommand: runCommand, legal: legal, potTotal: potTotal,
     chipBreakdown: chipBreakdown, computePots: computePots,
-    STREETS: STREETS, DENOMS: DENOMS.slice().reverse(), DEFAULTS: DEFAULTS
+    STREETS: STREETS, DENOMS: DENOMS.slice().reverse(), DEFAULTS: DEFAULTS,
+    bestHand: bestHand, makeDeck: makeDeck, shuffle: shuffle, HAND_NAMES: HAND_NAMES, RANK_LABEL: RANK_LABEL
   };
 });
