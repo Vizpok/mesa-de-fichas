@@ -117,8 +117,7 @@ const turnChanged = (pg, prev) => pg.waitForFunction(p => { const s = window.__m
   });
   await t('la partida local se guarda y se puede continuar tras recargar', async () => {
     await pg.reload();
-    assert(/Continuar partida local/.test(await text(pg, '.entries')));
-    await tap(pg, '[data-a=resumeLocal]');
+    await pg.waitForSelector('[data-a=more]'); // se retoma directo en la mesa
     assert.strictEqual((await snap(pg)).phase, 'showdown');
   });
   await t('menú Más: jugadores, ajustes e historial abren', async () => {
@@ -244,9 +243,10 @@ const turnChanged = (pg, prev) => pg.waitForFunction(p => { const s = window.__m
   const c5 = await browser.newContext({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true }); const narrow = await c5.newPage(); watch(narrow);
   await t('las pantallas principales caben en 320 px de ancho', async () => {
     const over = () => narrow.evaluate(() => Array.from(document.querySelectorAll('body *')).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1) && !e.closest('.rack') && !e.closest('.hero-chips'); }).map(e => e.className || e.tagName).slice(0, 5));
-    await narrow.goto(URL); assert.deepStrictEqual(await over(), []);
+    const fresh = async () => { await narrow.evaluate(() => { try { localStorage.removeItem('mf.ui'); } catch (e) { /* página en blanco */ } }); await narrow.goto(URL); };
+    await fresh(); assert.deepStrictEqual(await over(), []);
     await tap(narrow, '[data-a=goCreate]'); assert.deepStrictEqual(await over(), []);
-    await narrow.goto(URL); await tap(narrow, '[data-a=goLocal]');
+    await fresh(); await tap(narrow, '[data-a=goLocal]');
     for (const n of ['Viz', 'Ana', 'Luis']) { await narrow.fill('[data-f=lname]', n); await narrow.press('[data-f=lname]', 'Enter'); }
     await narrow.waitForFunction(() => document.querySelectorAll('.namelist li').length === 3);
     assert.deepStrictEqual(await over(), []);

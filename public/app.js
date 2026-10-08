@@ -112,8 +112,30 @@
     render();
   });
 
+  /* En la app de Android, el gesto/botón atrás lo atiende este oyente (si no, Android cerraría la app). */
+  function setupNativeBack() {
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (!plug || typeof plug.addListener !== 'function') return;
+    plug.addListener('backButton', () => {
+      if (navLevel() > 0) { if (S.sheet) S.sheet = null; else leaveScreen(); render(); }
+      else if (typeof plug.exitApp === 'function') plug.exitApp();
+    });
+  }
+
+  /* ---------- Recordar lo que estabas haciendo ----------
+     Si Android cierra la app en segundo plano, al volver aparece la misma pantalla, con lo que habías escrito. */
+  const FORM_SCREENS = ['create', 'join', 'localSetup', 'server'];
+  function saveUI() {
+    lsSet('mf.ui', { screen: S.screen, mode: S.mode, tab: S.tab, form: FORM_SCREENS.indexOf(S.screen) >= 0 ? S.form : null });
+  }
+  window.addEventListener('pagehide', () => { if (S.mode === 'local' && LT && S.screen === 'game') saveLocal(); saveUI(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { if (S.mode === 'local' && LT && S.screen === 'game') saveLocal(); saveUI(); }
+  });
+
   function doRender() {
     syncHistory();
+    saveUI();
     const ae = document.activeElement;
     let focus = null;
     if (ae && ae.dataset && ae.dataset.f) {
@@ -1071,17 +1093,26 @@
     let v = el.value;
     if (k === 'code') { v = v.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); if (el.value !== v) el.value = v; }
     S.form[k] = v;
+    saveUI();
   });
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; });
 
   /* ---------- Inicio ---------- */
   function boot() {
     initHistory();
+    if (NATIVE) setupNativeBack();
+    const ui = lsGet('mf.ui', null);
     S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0] };
     const qs = new URLSearchParams(location.search).get('sala');
     if (qs && !S.session) {
       S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0], code: qs.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) };
       S.screen = 'join';
+    } else if (ui && ui.screen === 'home') {
+      /* se quedó en el inicio */
+    } else if (ui && ui.screen === 'game' && ui.mode === 'local' && loadLocal()) {
+      enterLocal(); S.tab = ui.tab === 'table' ? 'table' : 'hand';
+    } else if (ui && FORM_SCREENS.indexOf(ui.screen) >= 0 && ui.form && typeof ui.form === 'object') {
+      S.form = ui.form; S.screen = ui.screen; S.busy = false;
     } else if (S.session) {
       S.screen = 'game'; S.mode = 'online'; openSocket();
     }

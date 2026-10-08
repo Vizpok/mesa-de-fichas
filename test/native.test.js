@@ -20,7 +20,7 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
   const t = async (name, fn) => { await fn(); ok++; console.log('  ✓ ' + name); };
   try {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 780 } });
-    await ctx.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true }; });
+    await ctx.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: { App: { addListener: (n, fn) => { if (n === 'backButton') window.__back = fn; }, exitApp: () => { window.__exited = true; } } } }; });
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
@@ -64,6 +64,47 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
     });
     await t('no se registra service worker dentro de la app', async () => {
       assert.strictEqual(await page.evaluate(async () => navigator.serviceWorker ? (await navigator.serviceWorker.getRegistrations()).length : 0), 0);
+    });
+    console.log('Gesto atrás de Android (oyente nativo)');
+    const fresh = async () => {
+      await page.evaluate(() => { ['mf.session', 'mf.ui', 'mf.local'].forEach(k => localStorage.removeItem(k)); });
+      await page.goto('http://app.test/');
+    };
+    const back = () => page.evaluate(() => window.__back());
+    await t('el gesto atrás vuelve al inicio y sólo en el inicio sale de la app', async () => {
+      await fresh();
+      await tap('[data-a="goJoin"]');
+      await page.waitForSelector('#f_code');
+      await back();
+      await page.waitForSelector('[data-a="goLocal"]');
+      assert.strictEqual(await page.evaluate(() => !!window.__exited), false);
+      await back();
+      assert.strictEqual(await page.evaluate(() => !!window.__exited), true);
+    });
+    console.log('Recordar lo que estabas haciendo');
+    await t('si la app se reinicia a medias, vuelve la misma pantalla con lo escrito', async () => {
+      await fresh();
+      await tap('[data-a="goLocal"]');
+      for (const n of ['Ana', 'Beto']) { await page.fill('#f_lname', n); await tap('button[data-a="localAdd"]'); await page.waitForFunction(x => document.body.innerText.includes(x), n); }
+      await page.fill('#f_lname', 'Cleo');
+      await page.reload();
+      await page.waitForSelector('#f_lname');
+      const txt = await page.textContent('body');
+      assert.ok(txt.includes('Ana') && txt.includes('Beto'), 'jugadores agregados');
+      assert.strictEqual(await page.inputValue('#f_lname'), 'Cleo');
+    });
+    await t('una partida local en curso se retoma directo en la mesa', async () => {
+      await tap('[data-a="localStart"]');
+      await page.waitForSelector('[data-a="more"]');
+      await page.reload();
+      await page.waitForSelector('[data-a="more"]');
+      assert.ok(!(await page.$('[data-a="goLocal"]')), 'no pasó por el inicio');
+    });
+    await t('si saliste al inicio, al reiniciar sigues en el inicio con la opción de continuar', async () => {
+      await back();
+      await page.waitForSelector('[data-a="resumeLocal"]');
+      await page.reload();
+      await page.waitForSelector('[data-a="resumeLocal"]');
     });
     console.log('Botón atrás del celular');
     const screenIs = async sel => { await page.waitForSelector(sel, { timeout: 4000 }); };
