@@ -1,0 +1,12 @@
+# Despliegue gratuito en Render (https://render.com): "New > Blueprint" y apunta a este repositorio.
+services:
+  - type: web
+    name: mesa-de-fichas
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NO_PERSIST
+        value: "1"

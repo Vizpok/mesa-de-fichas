@@ -1,0 +1,14 @@
+{
+  "name": "mesa-de-fichas",
+  "version": "1.0.0",
+  "description": "Administrador de fichas y apuestas para poker físico (sin cartas, puntos ficticios)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/engine.test.js && node test/server.test.js",
+    "test:ui": "node test/ui.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "dependencies": { "ws": "^8.18.0" }
+}

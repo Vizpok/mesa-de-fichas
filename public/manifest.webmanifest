@@ -1,0 +1,17 @@
+{
+  "name": "Mesa de fichas",
+  "short_name": "Fichas",
+  "description": "Fichas y apuestas para poker en persona, con puntos ficticios.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a1c18",
+  "theme_color": "#0a1c18",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
