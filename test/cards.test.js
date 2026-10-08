@@ -29,6 +29,7 @@ const waitSnap = (pg, cond) => pg.waitForFunction(c => { const s = window.__mf.S
   const errors = [];
   const mk = async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    await ctx.addInitScript(() => { try { localStorage.setItem('mf.view', '"simple"'); } catch (e) { /* nada */ } });
     const pg = await ctx.newPage(); pg.setDefaultTimeout(5000);
     pg.on('pageerror', e => errors.push('pageerror: ' + e.message));
     pg.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });

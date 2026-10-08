@@ -77,3 +77,6 @@ El proyecto de Android se genera en la compilación (carpeta `android-app/`, con
 
 ### Actualizar la app de Android
 El APK se firma siempre con la misma llave (`android-app/mesa-de-fichas.keystore`) y su `versionCode` sube en cada compilación, así que descargar el APK nuevo se instala encima del anterior sin perder nada. (Es una llave de uso informal, no de Play Store.)
+
+### Mesa animada y reglas del all-in
+En salas con cartas virtuales, la pestaña **Mesa** muestra una mesa de fieltro (o la vista **Sencilla**): el dealer reparte a cada asiento, quema una carta antes del flop, lanza y voltea el flop, el turn y el river, quien se retira lanza sus cartas al montón y en el showdown se voltean las manos. Es sólo visual; las decisiones las toma el motor. La regla del all-in sigue las reglas de torneo de la TDA: apostar todas tus fichas no obliga a nadie más a hacerlo, y un all-in más corto que una subida completa no reabre la subida (fuente: [reglas TDA](https://homepokertourney.org/poker-tda-rules.htm)).

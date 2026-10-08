@@ -50,7 +50,7 @@
   const S = {
     screen: 'home', mode: null, snap: null, you: { playerId: null, isHost: false },
     online: [], hostOnline: true, code: null, tab: 'hand', skew: 0, conn: 'off',
-    session: lsGet('mf.session', null), hide: !!lsGet('mf.hide', false), profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
+    session: lsGet('mf.session', null), hide: !!lsGet('mf.hide', false), view: lsGet('mf.view', 'felt') === 'simple' ? 'simple' : 'felt', profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
     form: {}, sheet: null, picks: {}, ties: {}, actFor: null, error: null, canReclaim: false, busy: false, okMsg: null
   };
   let LT = null; // mesa local
@@ -156,6 +156,7 @@
       const nm = $app.querySelector('.main');
       if (nm && top) nm.scrollTop = top;
     }
+    syncFelt();
     const sh = sheetHTML();
     if (sh !== lastSheet) {
       const old = $sheet.querySelector('.sheet');
@@ -494,17 +495,44 @@
     if (!log.length) return '';
     return `<div class="recent">${log.map(l => `<p>${esc(l.text)}</p>`).join('')}<button class="link" data-a="log">Ver historial</button></div>`;
   }
+  function viewSwitchHTML() {
+    return `<div class="seg viewseg" role="group" aria-label="Cómo ver la mesa"><button type="button" data-a="setView" data-k="felt" aria-pressed="${S.view === 'felt'}">Mesa</button><button type="button" data-a="setView" data-k="simple" aria-pressed="${S.view === 'simple'}">Sencilla</button></div>`;
+  }
+  const feltOn = () => cardsMode() && S.view === 'felt';
   function tableHTML() {
     const s = S.snap;
     let out = '';
-    if (live()) out += potBoxHTML();
+    if (cardsMode()) out += viewSwitchHTML();
     const a = actor();
+    if (feltOn()) {
+      out += '<div class="feltslot" id="feltslot"></div>';
+      if (a) out += actionsHTML(a, true);
+      out += phaseHTML();
+      out += recentHTML();
+      return out;
+    }
+    if (live()) out += potBoxHTML();
     if (a) out += actionsHTML(a);
     out += phaseHTML();
     out += seatsHTML();
     out += recentHTML();
     if (!live() && s.phase !== 'ended' && S.you.isHost) out += '<p class="dim" style="margin-top:16px">Para sumar o quitar jugadores, abre Más y entra a Jugadores.</p>';
     return out;
+  }
+
+  /* La mesa de fieltro vive fuera del HTML que se redibuja: aquí se vuelve a poner en su hueco */
+  function feltCtx() {
+    const s = S.snap;
+    return { players: s.players, youId: S.you.playerId, hand: s.hand || null, phase: s.phase, hole: S.you.hole || null, hide: S.hide, board: boardOf(), online: isLocal() ? null : S.online, pot: s.hand ? potNow() : 0 };
+  }
+  function syncFelt() {
+    const FT = window.FeltTable;
+    if (!FT) return;
+    if (!cardsMode()) { FT.reset(); return; }
+    FT.init({ cardHTML: cardHTML });
+    const slot = document.getElementById('feltslot');
+    if (slot && S.screen === 'game' && S.tab === 'table') { FT.mount(slot); FT.update(feltCtx(), true); }
+    else { FT.unmount(); FT.update(feltCtx(), false); }
   }
 
   /* Vista de mano: tus fichas, valor y botones */
@@ -703,6 +731,8 @@
         <li><b>Ronda 3 · Turn</b><p>Se voltea la 4.ª carta del centro. Otra vuelta de apuestas.</p></li>
         <li><b>Ronda 4 · River</b><p>Se voltea la 5.ª y última carta. Última vuelta de apuestas.</p></li>
         <li><b>Showdown</b><p>Quien siga en la mano muestra sus cartas. Gana la mejor mano de 5 cartas. Si todos menos uno se retiran antes, ese jugador gana sin mostrar nada.</p></li>
+        <li><b>Cartas quemadas</b><p>Antes del flop, del turn y del river el dealer descarta una carta tapada. Se hace para que nadie pueda adivinar la siguiente. En la mesa de la app el dealer lo hace solo.</p></li>
+        <li><b>All-in</b><p>Es apostar todas tus fichas. <em>Nadie más está obligado a ir all-in</em>: cada quien puede retirarse, igualar o subir como siempre. Si alguien iguala con menos fichas que la apuesta, sólo juega por lo que alcanzó a poner; el resto de la apuesta forma un bote aparte entre quienes sí lo igualaron. Un all-in más chico que una subida completa no vuelve a abrir la subida.</p></li>
         <li><b>Qué puedes hacer en tu turno</b><p><em>Pasar</em> (no apostar, si nadie ha apostado), <em>Igualar</em> (poner lo que falta), <em>Subir</em> (apostar más), <em>Retirarse</em> (dejas tus fichas en el bote) o <em>All-in</em> (todas tus fichas).</p></li>
       </ol>`;
     }
@@ -1011,6 +1041,7 @@
     openHands() { S.sheet = { type: 'hands', tab: 'rank' }; render(); },
     openRounds() { S.sheet = { type: 'hands', tab: 'rounds' }; render(); },
     handsTab(el) { S.sheet = { type: 'hands', tab: el.dataset.k }; render(); },
+    setView(el) { S.view = el.dataset.k === 'simple' ? 'simple' : 'felt'; lsSet('mf.view', S.view); render(); },
     toggleHide() { S.hide = !S.hide; lsSet('mf.hide', S.hide); render(); },
     toggleSeat() { S.form.seat = !S.form.seat; render(); },
     preset(el) { const keep = { r: S.form.s_rebuy, w: S.form.s_winnerPicker }; initSettingsForm(null, el.dataset.k); S.form.s_rebuy = keep.r; S.form.s_winnerPicker = keep.w; render(); },

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test/engine.test.js && node test/server.test.js",
-    "test:ui": "node test/ui.test.js && node test/cards.test.js && node test/native.test.js"
+    "test:ui": "node test/ui.test.js && node test/cards.test.js && node test/felt.test.js && node test/native.test.js"
   },
   "engines": { "node": ">=18" },
   "license": "MIT",

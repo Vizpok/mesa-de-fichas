@@ -1,6 +1,6 @@
 /* Service worker: deja la app disponible sin conexión (el modo "un solo celular" funciona sin internet). */
-const VERSION = 'mf-v3';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'engine.js', 'config.js', 'manifest.webmanifest',
+const VERSION = 'mf-v4';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'tableview.js', 'engine.js', 'config.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',
   'fonts/big-shoulders-display-latin-wght-normal.woff2', 'fonts/figtree-latin-wght-normal.woff2'];
 

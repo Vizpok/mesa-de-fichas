@@ -125,6 +125,19 @@ t('all-in corto no reabre la subida', () => {
   assert(!L.canRaise, 'A ya actuó y no puede resubir ante all-in corto');
   assert.strictEqual(L.toCall, 10);
 });
+t('un all-in no obliga a nadie a ir all-in: se puede igualar con menos o retirarse', () => {
+  const tb = mk(['A', 'B', 'C']);
+  tb.setStack('A', 100); tb.setStack('B', 1000); tb.setStack('C', 1000);
+  tb.startHand();
+  const h = tb.hand;
+  while (h.toAct !== 'A' && !h.allIn.A) act(tb, h.toAct, 'fold');
+  if (h.allIn.A || h.folded.A) return; // A quedó fuera por las ciegas: no aplica
+  act(tb, 'A', 'allin');
+  const next = h.toAct, L = E.legal(tb.snapshot(), next);
+  assert(L.turn && L.canCall && !L.callAllIn, 'igualar 100 no deja al otro sin fichas');
+  act(tb, next, 'call');
+  assert(stack(tb, next) > 800, 'sólo puso lo necesario para igualar');
+});
 t('botes laterales: 3 all-in distintos', () => {
   const tb = mk(['A', 'B', 'C', 'D']);
   tb.setStack('A', 100); tb.setStack('B', 300); tb.setStack('C', 600); tb.setStack('D', 600);
