@@ -70,7 +70,7 @@ Cada vez que se sube un cambio a `main`, GitHub compila el APK solo (pestaña **
 
 1. En el celular, abre la página de Releases del repositorio y descarga `mesa-de-fichas.apk`.
 2. Ábrelo. Si Android lo pide, permite instalar apps de ese origen (es un APK de prueba, no viene de la tienda).
-3. **Un solo celular** funciona sin internet. Para las **salas en línea**, entra a *Servidor de las salas* en el inicio y escribe la dirección donde corre el servidor (por ejemplo `mesa-de-fichas.onrender.com`, o `192.168.1.20:3000` si es una computadora de la misma red).
-4. Para dejar un servidor por defecto, edita `public/config.js`.
+3. **Un solo celular** funciona sin internet. Las **salas en línea** usan por defecto el servidor de `public/config.js` (`mesa-de-fichas.onrender.com`, en Render). Se puede cambiar desde *Servidor de las salas* en el inicio, por ejemplo a `192.168.1.20:3000` si es una computadora de la misma red.
+4. El plan gratis de Render duerme el servidor tras un rato sin uso: la primera conexión puede tardar hasta un minuto.
 
 El proyecto de Android se genera en la compilación (carpeta `android-app/`, con Capacitor); no hace falta Android Studio.

@@ -24,8 +24,10 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
+    let defaultServer = ''; // lo que valdría public/config.js
     await page.route('http://app.test/**', route => {
       let p = new URL(route.request().url()).pathname; if (p === '/') p = '/index.html';
+      if (p === '/config.js') return route.fulfill({ status: 200, contentType: 'text/javascript', body: 'window.MF_SERVER = ' + JSON.stringify(defaultServer) + ';' });
       const f = path.join(PUB, p);
       if (!f.startsWith(PUB) || !fs.existsSync(f)) return route.fulfill({ status: 404, body: '' });
       route.fulfill({ status: 200, contentType: TYPES[path.extname(f)] || 'application/octet-stream', body: fs.readFileSync(f) });
@@ -37,6 +39,18 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
       await page.goto('http://app.test/');
       await page.waitForSelector('[data-a="goServer"]');
       assert.ok((await page.textContent('[data-a="goServer"]')).includes('Aún no configurado'));
+    });
+    await t('con un servidor por defecto en config.js, el inicio ya lo muestra y se puede crear sala sin configurar nada', async () => {
+      defaultServer = 'mesa-de-fichas.onrender.com';
+      await page.goto('http://app.test/');
+      await page.waitForSelector('[data-a="goServer"]');
+      assert.ok((await page.textContent('[data-a="goServer"]')).includes('mesa-de-fichas.onrender.com'));
+      await tap('[data-a="goCreate"]');
+      await page.waitForSelector('#f_name');
+      defaultServer = '';
+      await tap('button.back[data-a="home"]');
+      await page.waitForSelector('[data-a="goCreate"]');
+      await page.goto('http://app.test/');
     });
     await t('crear sala sin servidor lleva a la pantalla del servidor con aviso', async () => {
       await tap('[data-a="goCreate"]');

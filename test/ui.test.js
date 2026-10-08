@@ -243,7 +243,7 @@ const turnChanged = (pg, prev) => pg.waitForFunction(p => { const s = window.__m
   const c5 = await browser.newContext({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true }); const narrow = await c5.newPage(); watch(narrow);
   await t('las pantallas principales caben en 320 px de ancho', async () => {
     const over = () => narrow.evaluate(() => Array.from(document.querySelectorAll('body *')).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1) && !e.closest('.rack') && !e.closest('.hero-chips'); }).map(e => e.className || e.tagName).slice(0, 5));
-    const fresh = async () => { if (await narrow.$('button.back[data-a=home]')) await narrow.click('button.back[data-a=home]'); await narrow.goto(URL); };
+    const fresh = async () => { if (await narrow.$('button.back[data-a=home]')) { await narrow.click('button.back[data-a=home]'); await narrow.waitForSelector('[data-a=goCreate]'); } await narrow.goto(URL); };
     await fresh(); assert.deepStrictEqual(await over(), []);
     await tap(narrow, '[data-a=goCreate]'); assert.deepStrictEqual(await over(), []);
     await fresh(); await tap(narrow, '[data-a=goLocal]');
