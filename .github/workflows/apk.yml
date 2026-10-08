@@ -1,0 +1,63 @@
+# Compila el APK de Android y lo publica en "Releases" (etiqueta apk-latest).
+name: APK de Android
+
+on:
+  push:
+    branches: [main]
+    paths: ['public/**', 'android-app/**', 'tools/android-icons.py', '.github/workflows/apk.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Preparar el proyecto de Android
+        working-directory: android-app
+        run: |
+          npm ci --no-audit --no-fund
+          rm -rf www && cp -r ../public www
+          npx cap add android
+          npx cap sync android
+          pip install --quiet pillow
+          python3 ../tools/android-icons.py android
+          # permite conectarse a un servidor en la red local (ws://192.168.x.x)
+          grep -q usesCleartextTraffic android/app/src/main/AndroidManifest.xml || \
+            sed -i 's#<application#<application android:usesCleartextTraffic="true"#' android/app/src/main/AndroidManifest.xml
+
+      - name: Compilar
+        working-directory: android-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Nombrar el archivo
+        run: cp android-app/android/app/build/outputs/apk/debug/app-debug.apk mesa-de-fichas.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mesa-de-fichas-apk
+          path: mesa-de-fichas.apk
+
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create apk-latest mesa-de-fichas.apk \
+            --title "Mesa de fichas (Android)" \
+            --notes "Descarga mesa-de-fichas.apk en el celular e instálalo. Si Android lo pide, permite instalar apps de este origen. Compilado desde el commit ${GITHUB_SHA::7}."

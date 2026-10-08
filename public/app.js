@@ -22,6 +22,22 @@
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin almacenamiento */ } };
   const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { /* nada */ } };
+
+  /* App de Android (APK): la página vive dentro del teléfono, así que el servidor de las salas se elige a mano. */
+  const NATIVE = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform());
+  // Acepta "mesa.onrender.com", "192.168.1.20:3000" o una dirección completa con http(s)://
+  function parseServer(raw) {
+    let t = String(raw == null ? '' : raw).trim().replace(/\/+$/, '').replace(/\/ws$/i, '');
+    if (!t) return null;
+    let secure = null;
+    const m = /^(https?|wss?):\/\//i.exec(t);
+    if (m) { secure = /^(https|wss)$/i.test(m[1]); t = t.slice(m[0].length); }
+    t = t.split('/')[0];
+    if (!/^[a-z0-9.-]+(:\d{1,5})?$/i.test(t)) return null;
+    if (secure === null) secure = !(/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(t) || /^localhost(:\d+)?$/i.test(t) || /\.local(:\d+)?$/i.test(t) || /:\d+$/.test(t));
+    return { host: t, secure: secure, label: t };
+  }
+  const savedServer = () => parseServer(lsGet('mf.server', '') || window.MF_SERVER || '');
   let toastT = 0;
   function toast(msg, bad) {
     $toast.textContent = msg;
@@ -113,6 +129,7 @@
       case 'create': return createHTML();
       case 'join': return joinHTML();
       case 'localSetup': return localSetupHTML();
+      case 'server': return serverHTML();
       case 'game': return gameHTML();
       default: return homeHTML();
     }
@@ -199,6 +216,7 @@
         <button class="entry${resume ? '' : ' primary'}" data-a="goCreate"><div><b>Crear sala</b><span>Cada quien usa su celular</span></div><span class="go">›</span></button>
         <button class="entry" data-a="goJoin"><div><b>Entrar con código</b><span>Escribe las 4 letras de la sala</span></div><span class="go">›</span></button>
         <button class="entry" data-a="goLocal"><div><b>Un solo celular</b><span>Un teléfono lleva toda la mesa, sin internet</span></div><span class="go">›</span></button>
+        ${NATIVE ? `<button class="entry" data-a="goServer"><div><b>Servidor de las salas</b><span>${savedServer() ? esc(savedServer().label) : 'Aún no configurado'}</span></div><span class="go">›</span></button>` : ''}
       </div>
       <p class="fine">Sólo se cuentan puntos ficticios. La app no reparte cartas ni mueve dinero.</p>
     </div>`;
@@ -227,6 +245,15 @@
         ${S.canReclaim ? '<button class="btn line-brass wide" type="button" data-a="reclaim">Soy yo, retomar mi asiento</button>' : ''}
         <button class="btn brass xl wide" type="submit" data-a="submitJoin"${S.busy ? ' disabled' : ''}>${S.busy ? 'Entrando…' : 'Sentarme a la mesa'}</button>
         <button class="link" type="button" data-a="spectate">Sólo mirar la mesa</button>
+      </form></div>`;
+  }
+  function serverHTML() {
+    return `<div class="screen">${barHTML('Servidor de las salas')}
+      <form class="form" data-submit="submitServer" novalidate>
+        <p class="dim">Las salas en línea necesitan un servidor de Mesa de fichas. Escribe su dirección: la que te dio quien lo instaló, o la de tu red (por ejemplo 192.168.1.20:3000). El modo de un solo celular no lo necesita.</p>
+        <div class="field"><label for="f_server">Dirección del servidor</label><input class="input" id="f_server" data-f="server" inputmode="url" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" value="${val('server')}" placeholder="mesa-de-fichas.onrender.com"></div>
+        ${S.error ? `<div class="err" role="alert">${esc(S.error)}</div>` : ''}
+        <button class="btn brass xl wide" type="submit" data-a="submitServer">Guardar</button>
       </form></div>`;
   }
   function localSetupHTML() {
@@ -645,7 +672,10 @@
 
   /* ---------- Red (salas en línea) ---------- */
   let ws = null, wsTimer = 0, wsTries = 0, pingT = 0, keepWake = null;
-  const wsURL = () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  const wsURL = () => {
+    if (NATIVE) { const sv = savedServer(); return (sv && sv.secure ? 'wss://' : 'ws://') + (sv ? sv.host : 'localhost') + '/ws'; }
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+  };
   function closeSocket() {
     clearTimeout(wsTimer);
     clearInterval(pingT);
@@ -774,11 +804,25 @@
   /* ---------- Acciones de la interfaz ---------- */
   const A = {
     home() { if (S.mode === 'online' && S.session && S.screen === 'game') return; S.error = null; S.canReclaim = false; closeSocketIfIdle(); go('home'); },
+    goServer(note) {
+      const sv = savedServer();
+      S.form = { server: sv ? sv.label : '' }; go('server');
+      if (typeof note === 'string' && note) { S.error = note; render(); }
+    },
+    submitServer() {
+      const raw = String(S.form.server || '').trim();
+      if (!raw) { lsDel('mf.server'); toast('Servidor borrado'); go('home'); return; }
+      const sv = parseServer(raw);
+      if (!sv) { S.error = 'Esa dirección no se entiende. Ejemplo: mesa-de-fichas.onrender.com'; render(); return; }
+      lsSet('mf.server', raw); toast('Servidor guardado'); go('home');
+    },
     goCreate() {
+      if (NATIVE && !savedServer()) { A.goServer('Primero escribe la dirección del servidor para usar salas en línea.'); return; }
       S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0], seat: true };
       initSettingsForm(null, 'casual'); S.busy = false; go('create');
     },
     goJoin() {
+      if (NATIVE && !savedServer()) { A.goServer('Primero escribe la dirección del servidor para usar salas en línea.'); return; }
       const url = new URLSearchParams(location.search).get('sala');
       S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0], code: S.form.code || (url ? url.toUpperCase().slice(0, 4) : '') };
       S.busy = false; S.canReclaim = false; go('join');
@@ -853,7 +897,8 @@
     more() { S.sheet = { type: 'more' }; render(); },
     closeSheet() { S.sheet = null; render(); },
     share() {
-      const url = location.origin + location.pathname + '?sala=' + S.code;
+      const sv = NATIVE ? savedServer() : null;
+      const url = sv ? (sv.secure ? 'https://' : 'http://') + sv.host + '/?sala=' + S.code : location.origin + location.pathname + '?sala=' + S.code;
       const text = 'Entra a mi mesa de poker. Código ' + S.code;
       if (navigator.share) { navigator.share({ title: 'Mesa de fichas', text: text, url: url }).catch(() => { /* cancelado */ }); return; }
       const done = () => toast('Enlace copiado: ' + url);
@@ -1009,7 +1054,7 @@
       S.screen = 'game'; S.mode = 'online'; openSocket();
     }
     render();
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    if (!NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch(() => { /* sin SW: la app funciona igual */ });
     }
   }

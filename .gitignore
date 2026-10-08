@@ -1,3 +1,6 @@
 node_modules/
 data/
 *.log
+android-app/node_modules/
+android-app/android/
+android-app/www/

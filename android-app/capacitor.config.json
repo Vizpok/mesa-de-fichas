@@ -1,0 +1,13 @@
+{
+  "appId": "app.mesadefichas",
+  "appName": "Mesa de fichas",
+  "webDir": "www",
+  "backgroundColor": "#0a1c18",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "mesa-de-fichas-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Empaqueta la app web como APK de Android (Capacitor). Lo compila el flujo de GitHub Actions.",
+  "dependencies": {
+    "@capacitor/android": "6.2.1",
+    "@capacitor/cli": "6.2.1",
+    "@capacitor/core": "6.2.1"
+  }
+}

@@ -63,3 +63,14 @@ npm run test:ui # interfaz en un navegador real con Playwright (22); requiere te
 - `public/app.js`, `styles.css`, `index.html`: la interfaz.
 - `public/sw.js`, `manifest.webmanifest`, íconos: para instalarla y usarla sin conexión.
 - `tools/make-icons.py`: regenera los íconos.
+
+## App de Android (APK)
+
+Cada vez que se sube un cambio a `main`, GitHub compila el APK solo (pestaña **Actions** → "APK de Android") y lo deja en **Releases** → `Mesa de fichas (Android)`.
+
+1. En el celular, abre la página de Releases del repositorio y descarga `mesa-de-fichas.apk`.
+2. Ábrelo. Si Android lo pide, permite instalar apps de ese origen (es un APK de prueba, no viene de la tienda).
+3. **Un solo celular** funciona sin internet. Para las **salas en línea**, entra a *Servidor de las salas* en el inicio y escribe la dirección donde corre el servidor (por ejemplo `mesa-de-fichas.onrender.com`, o `192.168.1.20:3000` si es una computadora de la misma red).
+4. Para dejar un servidor por defecto, edita `public/config.js`.
+
+El proyecto de Android se genera en la compilación (carpeta `android-app/`, con Capacitor); no hace falta Android Studio.
