@@ -7,7 +7,7 @@
   var H = null; // ayudas de app.js: { cardHTML, esc }
   var F = {
     el: null, felt: null, seatsEl: null, boardEl: null, flyEl: null, dealerEl: null, potEl: null,
-    seats: {}, model: null, epoch: 0, chain: Promise.resolve(), mounted: false, prevMounted: false, ids: '', hideOn: false
+    seats: {}, bets: {}, betsEl: null, model: null, epoch: 0, chain: Promise.resolve(), mounted: false, prevMounted: false, ids: '', hideOn: false
   };
 
   var SPARK = '<svg viewBox="0 0 64 64" aria-hidden="true"><g transform="translate(32 32)">' +
@@ -37,6 +37,34 @@
     try { a.commitStyles(); a.cancel(); } catch (e) { /* ya no está */ }
   }
 
+  /* ---------- Fichas en torres ---------- */
+  var money = function (n) { return new Intl.NumberFormat('es-MX').format(Math.round(n)); };
+  function towers(amount, max) {
+    var E = window.PokerEngine;
+    if (!E || !(amount > 0)) return '';
+    return E.chipBreakdown(amount).slice(0, max || 4).map(function (b) {
+      var n = Math.min(b.c, 8), h = '';
+      for (var i = 0; i < n; i++) h += '<i class="ch" data-d="' + b.d + '" style="--i:' + i + '"></i>';
+      return '<span class="tw" style="--n:' + n + '">' + h + '</span>';
+    }).join('');
+  }
+  function flyChips(fromEl, toEl, amount, delay) {
+    var E = window.PokerEngine;
+    if (!E || !fromEl || !toEl || !(amount > 0) || !F.flyEl) return Promise.resolve();
+    var a = center(fromEl), b = center(toEl), fr = F.felt.getBoundingClientRect();
+    var dens = E.chipBreakdown(amount).slice(0, 3), ps = [];
+    for (var i = 0; i < Math.min(5, Math.max(2, dens.length + 1)); i++) {
+      var g = document.createElement('i');
+      g.className = 'ch ghost'; g.dataset.d = dens[i % dens.length].d;
+      g.style.cssText = 'position:absolute;left:' + (a.x - fr.left - 12) + 'px;top:' + (a.y - fr.top - 6) + 'px;--i:0;';
+      F.flyEl.appendChild(g);
+      (function (g, i) {
+        ps.push(play(g, [{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: 'translate(' + ((b.x - a.x) * .5) + 'px,' + ((b.y - a.y) * .5 - 18) + 'px) scale(1.15)', offset: .5, opacity: 1 }, { transform: 'translate(' + (b.x - a.x + rnd(-6, 6)) + 'px,' + (b.y - a.y + rnd(-4, 4)) + 'px) scale(.9)', opacity: .95 }], { duration: 480, delay: (delay || 0) + i * 70, easing: 'cubic-bezier(.3,.7,.3,1)' }).then(function () { g.remove(); }));
+      })(g, i);
+    }
+    return Promise.all(ps);
+  }
+
   /* ---------- Armado del DOM ---------- */
   function build() {
     var el = document.createElement('div');
@@ -46,12 +74,13 @@
       '<div class="muckspot" aria-hidden="true"></div>' +
       '<div class="dealer" aria-label="Dealer" role="img"><div class="spark">' + SPARK + '</div><span>Dealer</span></div>' +
       '<div class="board" data-board></div>' +
-      '<div class="fpot" data-pot></div>' +
+      '<div class="potspot" data-pot></div>' +
+      '<div class="betlayer" data-bets></div>' +
       '<div class="seats" data-seats></div>' +
       '<div class="fly" data-fly aria-hidden="true"></div></div>';
     F.el = el; F.felt = el.querySelector('.felt'); F.seatsEl = el.querySelector('[data-seats]');
     F.boardEl = el.querySelector('[data-board]'); F.flyEl = el.querySelector('[data-fly]');
-    F.dealerEl = el.querySelector('.dealer .spark'); F.potEl = el.querySelector('[data-pot]');
+    F.dealerEl = el.querySelector('.dealer .spark'); F.potEl = el.querySelector('[data-pot]'); F.betsEl = el.querySelector('[data-bets]'); F.bets = {};
     for (var i = 0; i < 5; i++) { var s = document.createElement('div'); s.className = 'bs'; F.boardEl.appendChild(s); }
     /* Mantener presionado para echar un vistazo a tus cartas cuando están ocultas */
     var peekEl = null;
@@ -125,9 +154,12 @@
       }
       var pos = seatPos(i, n);
       s.style.left = pos.x + '%'; s.style.top = pos.y + '%';
+      var bt = F.bets[p.id];
+      if (!bt) { bt = document.createElement('div'); bt.className = 'bet'; F.bets[p.id] = bt; F.betsEl.appendChild(bt); }
+      bt.style.left = (pos.x + (50 - pos.x) * .34) + '%'; bt.style.top = (pos.y + (49 - pos.y) * .34) + '%';
       s.classList.toggle('me', p.id === ctx.youId);
     });
-    Object.keys(F.seats).forEach(function (id) { if (!seen[id]) { F.seats[id].remove(); delete F.seats[id]; } });
+    Object.keys(F.seats).forEach(function (id) { if (!seen[id]) { F.seats[id].remove(); delete F.seats[id]; if (F.bets[id]) { F.bets[id].remove(); delete F.bets[id]; } } });
     F.ids = ids;
   }
   function labels(ctx) {
@@ -149,10 +181,21 @@
       if (h && h.sbId === p.id) tg += '<i>SB</i>';
       if (h && h.bbId === p.id) tg += '<i>BB</i>';
       s.querySelector('.tg').innerHTML = tg;
-      s.querySelector('.st').textContent = folded ? 'Retirado' : (all ? 'All-in' : (out ? (p.status === 'left' ? 'Se fue' : 'Fuera') : ''));
+      var turn = !!(h && ctx.phase === 'betting' && h.toAct === p.id), st = s.querySelector('.st');
+      if (turn && ctx.turnSeconds > 0) { s.dataset.end = String(h.grace ? h.graceUntil : h.turnStart + ctx.turnSeconds * 1000); s.dataset.grace = h.grace ? '1' : ''; }
+      else { delete s.dataset.end; delete s.dataset.grace; s.classList.remove('low'); st.textContent = folded ? 'Retirado' : (all ? 'All-in' : (out ? (p.status === 'left' ? 'Se fue' : 'Fuera') : '')); }
     });
-    var pot = h ? ctx.pot : 0;
-    F.potEl.textContent = h && pot > 0 ? 'Bote ' + new Intl.NumberFormat('es-MX').format(Math.round(pot)) : '';
+    var sum = 0;
+    ctx.players.forEach(function (p) {
+      var bt = F.bets[p.id], v = (h && h.bets && h.bets[p.id]) || 0;
+      sum += v;
+      if (!bt) return;
+      var html = v > 0 ? '<span class="tws">' + towers(v, 3) + '</span><span class="bv">' + money(v) + '</span>' : '';
+      if (bt.dataset.v !== String(v)) { bt.innerHTML = html; bt.dataset.v = String(v); }
+    });
+    var pot = h ? Math.max(0, ctx.pot - sum) : 0, total = h ? ctx.pot : 0;
+    var potHTML = total > 0 ? (pot > 0 ? '<span class="tws">' + towers(pot, 4) + '</span>' : '') + '<span class="pv">Bote ' + money(total) + '</span>' : '';
+    if (F.potEl.dataset.v !== potHTML) { F.potEl.innerHTML = potHTML; F.potEl.dataset.v = potHTML; }
   }
   var cardsOf = function (seat) { return seat.querySelector('.cards'); };
 
@@ -184,6 +227,7 @@
       var net = r && r.net ? r.net[id] : 0;
       var g = s.querySelector('.gain');
       g.textContent = net > 0 ? '+' + new Intl.NumberFormat('es-MX').format(net) : '';
+      if (net > 0 && animate) flyChips(F.potEl, s.querySelector('.cards') || s, net, 120);
       if (net > 0 && animate) play(g, [{ transform: 'translate(-50%,6px) scale(.6)', opacity: 0 }, { transform: 'translate(-50%,-6px) scale(1.15)', opacity: 1, offset: .4 }, { transform: 'translate(-50%,-14px) scale(1)', opacity: 1 }], { duration: 700, easing: 'ease-out' });
       if (contested && w && h.info && h.info[id]) (h.info[id].best || []).forEach(function (c) { best[c] = true; });
     });
@@ -369,6 +413,20 @@
       Object.keys(h.shown || {}).forEach(function (id) { m.shown[id] = true; });
     }
     m.ended = ctx.phase === 'between'; m.hole = !!ctx.hole; m.hide = !!ctx.hide; m.dealing = false; m.sig = sig(ctx);
+    m.bets = {}; if (h && h.bets) Object.keys(h.bets).forEach(function (id) { m.bets[id] = h.bets[id]; });
+  }
+  function chipFlights(ctx, m) {
+    var h = ctx.hand, prev = m.bets || {};
+    var cur = {};
+    ctx.players.forEach(function (p) { cur[p.id] = (h && h.bets && h.bets[p.id]) || 0; });
+    var swept = false;
+    ctx.players.forEach(function (p) {
+      var a = prev[p.id] || 0, b = cur[p.id];
+      if (b > a && F.seats[p.id] && F.bets[p.id]) flyChips(F.seats[p.id].querySelector('.cards') || F.seats[p.id], F.bets[p.id], b - a, 0);
+      else if (b < a && b === 0 && ctx.phase !== 'between') { swept = true; if (F.bets[p.id]) flyChips(F.bets[p.id], F.potEl, a, 0); }
+    });
+    m.bets = cur;
+    return swept;
   }
   function update(ctx, mounted) {
     if (!F.el) build();
@@ -395,12 +453,14 @@
       F.epoch++;
       F.model = m = { no: no, me: ctx.youId };
       clearCards();
-      syncModel(m, ctx); m.board = 0; m.folded = {}; m.shown = {}; m.ended = false; m.hole = false; m.hide = !!ctx.hide; m.dealing = true;
+      syncModel(m, ctx); m.board = 0; m.folded = {}; m.shown = {}; m.ended = false; m.hole = false; m.hide = !!ctx.hide; m.dealing = true; m.bets = {};
       if (!cardsOn) { m.dealing = false; return; }
       if (h.order.length >= 2) { var ep = F.epoch; m.hole = !!ctx.hole; enqueue(function () { return dealTask(ep, ctx); }); }
       else { snapAll(ctx); syncModel(m, ctx); return; }
     }
     m.me = ctx.youId;
+    // 0) fichas: apuestas que suben vuelan del asiento a su sitio; al cambiar de ronda se barren al bote
+    chipFlights(ctx, m);
     // 1) se retiró alguien
     Object.keys(h.folded).forEach(function (id) {
       if (h.folded[id] && !m.folded[id]) { m.folded[id] = true; enqueue(function (e) { return foldTask(e, id); }); }
@@ -422,6 +482,29 @@
     }
     m.sig = sig(ctx);
   }
+  function tick(skew) {
+    if (!F.el) return;
+    Object.keys(F.seats).forEach(function (id) {
+      var s = F.seats[id], end = Number(s.dataset.end);
+      if (!end) return;
+      var left = Math.max(0, Math.ceil((end - (Date.now() + (skew || 0))) / 1000)), st = s.querySelector('.st');
+      var txt = (s.dataset.grace ? '¡Última! ' : '⏱ ') + left + ' s';
+      if (st.textContent !== txt) st.textContent = txt;
+      s.classList.toggle('low', left <= 5 || !!s.dataset.grace);
+    });
+  }
+  function say(pid, text) {
+    var s = F.seats[pid];
+    if (!s || !F.mounted) return;
+    var old = s.querySelector('.bubble'); if (old) old.remove();
+    var b = document.createElement('div');
+    b.className = 'bubble' + (/^[\p{Extended_Pictographic}\p{Emoji_Presentation}\u200d\ufe0f\s]+$/u.test(text) && text.length <= 16 ? ' big' : '');
+    b.textContent = text;
+    s.appendChild(b);
+    play(b, [{ transform: 'translate(-50%,8px) scale(.5)', opacity: 0 }, { transform: 'translate(-50%,-2px) scale(1.08)', opacity: 1, offset: .3 }, { transform: 'translate(-50%,0) scale(1)', opacity: 1 }], { duration: 260, easing: 'ease-out' });
+    clearTimeout(b._t);
+    b._t = setTimeout(function () { play(b, [{ opacity: 1 }, { opacity: 0, transform: 'translate(-50%,-8px) scale(.95)' }], { duration: 260 }).then(function () { b.remove(); }); }, Math.min(6500, 2600 + text.length * 70));
+  }
   function mount(slot) {
     if (!F.el) build();
     if (F.el.parentNode !== slot) slot.appendChild(F.el);
@@ -430,5 +513,5 @@
   function unmount() { if (F.el && F.el.parentNode) F.el.parentNode.removeChild(F.el); F.mounted = false; F.prevMounted = false; }
   function reset() { unmount(); F.epoch++; F.model = null; F.prevMounted = false; Object.keys(F.seats).forEach(function (id) { F.seats[id].remove(); delete F.seats[id]; }); if (F.el) clearCards(); }
 
-  window.FeltTable = { init: function (helpers) { H = helpers; }, update: update, mount: mount, unmount: unmount, reset: reset };
+  window.FeltTable = { init: function (helpers) { H = helpers; }, update: update, mount: mount, unmount: unmount, reset: reset, tick: tick, say: say };
 })();

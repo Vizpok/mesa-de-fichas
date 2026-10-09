@@ -281,6 +281,51 @@ function get(p) {
     [a, b, spectator].forEach(c => c.ws.close());
   });
 
+  console.log('Servidor — chat');
+  await t('el chat llega a todos, limpio y con tope de largo; los espectadores no pueden escribir', async () => {
+    const h = client(); await h.open;
+    h.send({ t: 'create', name: 'Viz', emoji: '😎' }); await h.until(c => c.hello);
+    const code2 = h.hello.code;
+    const b = client(); await b.open; b.send({ t: 'join', code: code2, name: 'Beto', emoji: '🦊' }); await b.until(c => c.hello);
+    const sp = client(); await sp.open; sp.send({ t: 'join', code: code2 }); await sp.until(c => c.hello);
+    h.send({ t: 'chat', text: '  hola\n\n   mesa  ' });
+    await b.until(c => c.msgs.some(m => m.t === 'chat'));
+    const m = b.msgs.find(x => x.t === 'chat').msg;
+    assert.strictEqual(m.text, 'hola mesa'); assert.strictEqual(m.name, 'Viz'); assert.strictEqual(m.emoji, '😎');
+    await sp.until(c => c.msgs.some(x => x.t === 'chat'));
+    b.send({ t: 'chat', text: 'x'.repeat(200) });
+    await h.until(c => c.msgs.filter(x => x.t === 'chat').length === 2);
+    assert.strictEqual(h.msgs.filter(x => x.t === 'chat')[1].msg.text.length, 40);
+    b.send({ t: 'chat', text: '   ' }); await sleep(80);
+    assert.strictEqual(h.msgs.filter(x => x.t === 'chat').length, 2, 'un mensaje vacío no se manda');
+    sp.send({ t: 'chat', text: 'hola' });
+    await sp.until(c => c.errs.length);
+    await sleep(80);
+    assert.strictEqual(h.msgs.filter(x => x.t === 'chat').length, 2);
+    const late = client(); await late.open; late.send({ t: 'join', code: code2, name: 'Cleo' }); await late.until(c => c.hello);
+    assert.strictEqual(late.hello.chat.length, 2, 'quien entra ve lo último que se escribió');
+    [h, b, sp, late].forEach(c => c.ws.close());
+  });
+  await t('5 mensajes en 5 segundos activan 10 segundos de espera, sólo para quien se pasó', async () => {
+    const h = client(); await h.open;
+    h.send({ t: 'create', name: 'Viz', emoji: '😎' }); await h.until(c => c.hello);
+    const b = client(); await b.open; b.send({ t: 'join', code: h.hello.code, name: 'Beto' }); await b.until(c => c.hello);
+    for (let i = 1; i <= 4; i++) h.send({ t: 'chat', text: 'm' + i });
+    await b.until(c => c.msgs.filter(x => x.t === 'chat').length === 4);
+    assert(!h.msgs.some(x => x.t === 'chatLock'), 'con 4 todavía no hay espera');
+    h.send({ t: 'chat', text: 'm5' });
+    await h.until(c => c.msgs.some(x => x.t === 'chatLock'));
+    const until = h.msgs.find(x => x.t === 'chatLock').until;
+    assert(until - Date.now() > 8000 && until - Date.now() <= 10000, 'espera de ~10 s');
+    assert.strictEqual(b.msgs.filter(x => x.t === 'chat').length, 5, 'el 5.º sí se entrega');
+    h.send({ t: 'chat', text: 'm6' }); await sleep(120);
+    assert.strictEqual(b.msgs.filter(x => x.t === 'chat').length, 5, 'el 6.º se descarta mientras dura la espera');
+    assert.strictEqual(h.msgs.filter(x => x.t === 'chatLock').length, 2, 'vuelve a avisar la espera');
+    b.send({ t: 'chat', text: 'yo sí puedo' });
+    await h.until(c => c.msgs.filter(x => x.t === 'chat').length === 6);
+    h.ws.close(); b.ws.close();
+  });
+
   console.log('\n' + pass + ' pasaron, ' + fail + ' fallaron');
   srv.kill();
   process.exit(fail ? 1 : 0);

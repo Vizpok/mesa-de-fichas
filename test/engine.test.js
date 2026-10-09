@@ -357,13 +357,41 @@ t('deshacer una resolución devuelve el showdown', () => {
   assert(tb.resolve([['B']]).ok);
   assert.strictEqual(stack(tb, 'B'), 2000);
 });
-t('reloj: al acabarse pasa si puede, si no se retira', () => {
+t('reloj: al acabarse hay 15 s de gracia y después se retira solo', () => {
   const tb = mk(['A', 'B', 'C'], { turnSeconds: 10 });
   tb.startHand();
-  const t0 = tb.hand.turnStart;
+  const t0 = tb.hand.turnStart, first = tb.hand.toAct;
   assert(!tb.tick(t0 + 5000));
-  assert(tb.tick(t0 + 11000));
-  assert(tb.hand.folded['A']);
+  assert(tb.tick(t0 + 11000), 'primero avisa y da la gracia');
+  assert(tb.hand.grace && !tb.hand.folded[first] && tb.hand.toAct === first);
+  assert(!tb.tick(t0 + 20000), 'durante la gracia no pasa nada');
+  assert(tb.tick(t0 + 27000));
+  assert(tb.hand.folded[first]);
+  assert.strictEqual(tb.player(first).afk, 1);
+  assert(!tb.player(first).sitOut, 'una vez no basta para sentarlo fuera');
+});
+t('reloj: si puede pasar, pasa solo; con 2 turnos seguidos sin responder queda sentado fuera', () => {
+  const tb = mk(['A', 'B'], { turnSeconds: 10 });
+  tb.startHand();
+  const h = tb.hand, sb = h.toAct;
+  act(tb, sb, 'call');
+  const bb = h.toAct; // el BB puede pasar
+  const t0 = h.turnStart;
+  tb.tick(t0 + 11000); assert(tb.tick(t0 + 27000));
+  assert(!h.folded[bb], 'pasó en lugar de retirarse');
+  assert.strictEqual(tb.player(bb).afk, 1);
+  // segundo turno seguido sin responder (flop)
+  const t1 = h.turnStart; const who = h.toAct;
+  tb.tick(t1 + 11000);
+  if (who === bb) { assert(tb.tick(t1 + 27000)); assert(tb.player(bb).sitOut, '2 seguidos: sentado fuera'); }
+});
+t('reloj: jugar a tiempo borra el conteo de turnos sin responder', () => {
+  const tb = mk(['A', 'B', 'C'], { turnSeconds: 10 });
+  tb.startHand();
+  const h = tb.hand, id = h.toAct;
+  tb.player(id).afk = 1;
+  act(tb, id, 'call');
+  assert.strictEqual(tb.player(id).afk, 0);
 });
 t('snapshot es serializable y se puede restaurar', () => {
   const tb = mk(['A', 'B', 'C']);

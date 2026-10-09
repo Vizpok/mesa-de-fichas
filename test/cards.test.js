@@ -205,6 +205,7 @@ const waitSnap = (pg, cond) => pg.waitForFunction(c => { const s = window.__mf.S
     await pg.waitForFunction(() => window.__mf.S.you.hole);
     const over = () => pg.evaluate(() => Array.from(document.querySelectorAll('body *')).filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1) && !e.closest('.rack') && !e.closest('.ticker'); }).map(e => e.className || e.tagName).slice(0, 5));
     assert.deepStrictEqual(await over(), [], 'mano');
+    if (await pg.locator('.turnban').count()) await tap(pg, '.turnban');
     await tap(pg, '[data-a=tab][data-k=table]'); assert.deepStrictEqual(await over(), [], 'mesa');
     await tap(pg, '[data-a=openHands]'); assert.deepStrictEqual(await over(), [], 'manos');
   });

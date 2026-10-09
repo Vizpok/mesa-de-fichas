@@ -401,7 +401,7 @@
   T.sitOut = function (id, on) {
     var p = this.player(id);
     if (!p) return err('Jugador no encontrado');
-    p.sitOut = !!on;
+    p.sitOut = !!on; if (p.afk) p.afk = 0;
     this._log(p.name + (on ? ' se sienta fuera (se salta las manos)' : ' vuelve a jugar'));
     return ok();
   };
@@ -553,7 +553,7 @@
   T._setTurn = function (id, force) {
     var h = this.hand;
     if (h.toAct === id && !force) return;
-    h.toAct = id; h.turnStart = Date.now();
+    h.toAct = id; h.turnStart = Date.now(); h.grace = false; h.graceUntil = 0;
   };
   T._advance = function (fromIdx) {
     var h = this.hand;
@@ -624,6 +624,7 @@
     var h = this.hand;
     if (h.toAct !== id) return err('No es su turno');
     var p = this.player(id), L = legal(this, id), to = null;
+    if (p && p.afk) p.afk = 0; // jugó por su cuenta: se borra el conteo de turnos sin responder
     if (type === 'fold') { /* siempre */ }
     else if (type === 'check') { if (!L.canCheck) return err('No puedes pasar: hay una apuesta'); }
     else if (type === 'call') { if (!L.canCall) return err('No hay nada que igualar'); }
@@ -733,13 +734,32 @@
     this._purge();
   };
 
+  /* Reloj de turno. Al acabarse el tiempo hay una sola gracia de 15 s (también si se desconectó, para dar
+     chance de volver); si pasa, se juega solo (pasa si puede, si no se retira). Con 2 turnos seguidos así
+     la persona queda "sentada fuera" para que el juego no se trabe; puede volver cuando quiera. */
+  var GRACE_MS = 15000, AFK_LIMIT = 2;
   T.tick = function (now) {
     var h = this.hand, s = this.settings;
     if (this.phase !== 'betting' || !h || !h.toAct || !(s.turnSeconds > 0)) return false;
-    if (now - h.turnStart < s.turnSeconds * 1000) return false;
-    var id = h.toAct, L = legal(this, id), name = this._name(id);
-    this._log('⏱️ Se acabó el tiempo de ' + name);
-    return this.act(id, L.canCheck ? 'check' : 'fold').ok;
+    var id = h.toAct, name = this._name(id);
+    if (!h.grace) {
+      if (now - h.turnStart < s.turnSeconds * 1000) return false;
+      h.grace = true; h.graceUntil = now + GRACE_MS;
+      this._log('⏱️ Se acabó el tiempo de ' + name + ': tiene ' + (GRACE_MS / 1000) + ' s más');
+      return true;
+    }
+    if (now < h.graceUntil) return false;
+    var p = this.player(id), prev = (p && p.afk) || 0, L = legal(this, id);
+    this._log('⏱️ ' + name + ' no respondió: ' + (L.canCheck ? 'pasa solo' : 'se retira solo'));
+    var r = this.act(id, L.canCheck ? 'check' : 'fold');
+    if (r.ok && p) {
+      p.afk = prev + 1;
+      if (p.afk >= AFK_LIMIT && !p.sitOut) {
+        p.sitOut = true;
+        this._log('😴 ' + name + ' queda sentado fuera por no responder. Puede volver a jugar desde Más.');
+      }
+    }
+    return r.ok;
   };
 
   T.endGame = function () {

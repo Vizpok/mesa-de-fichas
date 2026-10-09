@@ -50,7 +50,7 @@
   const S = {
     screen: 'home', mode: null, snap: null, you: { playerId: null, isHost: false },
     online: [], hostOnline: true, code: null, tab: 'hand', skew: 0, conn: 'off',
-    session: lsGet('mf.session', null), hide: !!lsGet('mf.hide', false), view: lsGet('mf.view', 'felt') === 'simple' ? 'simple' : 'felt', profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
+    session: lsGet('mf.session', null), hide: !!lsGet('mf.hide', false), sound: lsGet('mf.sound', true) !== false, quick: null, chat: [], chatSeen: 0, chatLock: 0, sent: [], tray: false, peek: null, turnSince: 0, view: lsGet('mf.view', 'felt') === 'simple' ? 'simple' : 'felt', profile: lsGet('mf.profile', { name: '', emoji: EMOJIS[0] }),
     form: {}, sheet: null, picks: {}, ties: {}, actFor: null, error: null, canReclaim: false, busy: false, okMsg: null
   };
   let LT = null; // mesa local
@@ -165,6 +165,8 @@
       lastSheet = sh;
       const ns = $sheet.querySelector('.sheet');
       if (ns && top) ns.scrollTop = top;
+      const cl = $sheet.querySelector('#chatlist');
+      if (cl) cl.scrollTop = cl.scrollHeight;
     }
     if (focus) {
       const el = document.querySelector('[data-f="' + focus.k + '"]');
@@ -291,7 +293,7 @@
     out += numField('s_blindsEvery', 'Subir ciegas cada', 'manos. 0 = nunca suben', d('blindsEvery'));
     out += `<div class="field"><div class="switch"><span class="lab" style="margin:0">Permitir recompra al quedarse sin fichas</span><button type="button" data-a="setopt" data-k="s_rebuy" data-v="${!S.form.s_rebuy}" aria-pressed="${!!S.form.s_rebuy}" aria-label="Recompra"></button></div></div>`;
     if (S.form.s_rebuy) out += numField('s_rebuyAmount', 'Fichas por recompra', '');
-    out += numField('s_turnSeconds', 'Tiempo por turno', 'segundos. 0 = sin reloj. Si se acaba, pasa o se retira solo.');
+    out += numField('s_turnSeconds', 'Tiempo por turno', 'segundos. 0 = sin reloj. Al acabarse hay 15 s más; después pasa o se retira solo.');
     if (S.form.s_cards !== 'virtual') out += `<div class="field"><div class="lab">Quién reporta al ganador</div><div class="seg" role="group" aria-label="Quién reporta al ganador">
       <button type="button" data-a="setopt" data-k="s_winnerPicker" data-v="dealer" aria-pressed="${S.form.s_winnerPicker === 'dealer'}">El dealer</button>
       <button type="button" data-a="setopt" data-k="s_winnerPicker" data-v="host" aria-pressed="${S.form.s_winnerPicker === 'host'}">Sólo el host</button></div>
@@ -400,7 +402,7 @@
       banner = '<div class="banner" role="status">El host se desconectó. <button class="link" data-a="claimHost">Tomar el mando</button></div>';
     const tabs = tabsHTML();
     const body = S.tab === 'table' ? tableHTML() : handHTML();
-    return `<div class="game">${topHTML()}${banner}${tickerHTML()}<main class="main">${body}</main>${tabs}</div>`;
+    return `<div class="game">${topHTML()}${banner}${tickerHTML()}<main class="main">${body}</main>${tabs}${chatDockHTML()}${chatPeekHTML()}${turnBannerHTML()}</div>`;
   }
   function headline() {
     const s = S.snap;
@@ -419,10 +421,12 @@
   function tabsHTML() {
     const first = isLocal() ? 'Turno' : (S.you.playerId ? 'Mi mano' : (S.you.isHost ? 'Control' : 'Sentarme'));
     const mine = !isLocal() && S.you.playerId && actor() === S.you.playerId && S.snap.phase === 'betting';
-    return `<nav class="tabs" aria-label="Secciones">
+    const n = unreadN();
+    const chatTab = chatOn() ? `<button data-a="toggleTray" class="tabchat${S.tray ? ' open' : ''}" aria-expanded="${S.tray}" aria-label="Chat y mensajes rápidos${n ? ', ' + n + ' sin leer' : ''}">Chat${n && !S.tray ? `<i class="badge">${n > 9 ? '9+' : n}</i>` : ''}</button>` : '';
+    return `<nav class="tabs${chatTab ? ' four' : ''}" aria-label="Secciones">
       <button data-a="tab" data-k="hand" ${S.tab === 'hand' ? 'aria-current="page"' : ''}>${first}${mine && S.tab !== 'hand' ? '<span class="pip" aria-label="Es tu turno"></span>' : ''}</button>
       <button data-a="tab" data-k="table" ${S.tab === 'table' ? 'aria-current="page"' : ''}>Mesa</button>
-      <button data-a="more">Más</button></nav>`;
+      ${chatTab}<button data-a="more">Más</button></nav>`;
   }
 
   /* Posiciones y estado de cada asiento */
@@ -523,7 +527,7 @@
   /* La mesa de fieltro vive fuera del HTML que se redibuja: aquí se vuelve a poner en su hueco */
   function feltCtx() {
     const s = S.snap;
-    return { players: s.players, youId: S.you.playerId, hand: s.hand || null, phase: s.phase, hole: S.you.hole || null, hide: S.hide, board: boardOf(), online: isLocal() ? null : S.online, pot: s.hand ? potNow() : 0 };
+    return { players: s.players, youId: S.you.playerId, hand: s.hand || null, phase: s.phase, turnSeconds: s.settings.turnSeconds || 0, hole: S.you.hole || null, hide: S.hide, board: boardOf(), online: isLocal() ? null : S.online, pot: s.hand ? potNow() : 0 };
   }
   function syncFelt() {
     const FT = window.FeltTable;
@@ -533,6 +537,100 @@
     const slot = document.getElementById('feltslot');
     if (slot && S.screen === 'game' && S.tab === 'table') { FT.mount(slot); FT.update(feltCtx(), true); }
     else { FT.unmount(); FT.update(feltCtx(), false); }
+  }
+
+  /* ---------- Chat y accesos rápidos ---------- */
+  const DEFAULT_QUICK = ['👍', '😂', '😮', '🔥', '😭', 'GG', '¡Vamos!', 'Buena mano', 'Mmm…'];
+  const QUICK_MAX = 12;
+  function cleanQuick(a) {
+    if (!Array.isArray(a)) return DEFAULT_QUICK.slice();
+    const out = [];
+    a.forEach(x => { const t = Array.from(String(x == null ? '' : x).replace(/\s+/g, ' ').trim()).slice(0, 24).join(''); if (t && out.indexOf(t) < 0 && out.length < QUICK_MAX) out.push(t); });
+    return out.length ? out : DEFAULT_QUICK.slice();
+  }
+  S.quick = cleanQuick(lsGet('mf.quick', null));
+  const chatOn = () => !!(S.mode === 'online' && S.snap && S.you.playerId);
+  const chatLeft = () => Math.max(0, Math.ceil((S.chatLock - Date.now()) / 1000));
+  const onlyEmoji = t => /^[\p{Extended_Pictographic}\p{Emoji_Presentation}‍️\s]+$/u.test(t) && t.length <= 16;
+  function lockTimer() { clearTimeout(lockT); const ms = S.chatLock - Date.now(); if (ms > 0) lockT = setTimeout(() => { S.chatLock = 0; render(); }, ms + 80); }
+  let lockT = null;
+  function sendChat(text) {
+    text = String(text == null ? '' : text).trim();
+    if (!text) return false;
+    if (!ws || ws.readyState !== 1) { toast('Sin conexión con la sala', true); return false; }
+    const left = chatLeft();
+    if (left > 0) { toast('Espera ' + left + ' s para escribir otra vez', true); return false; }
+    ws.send(JSON.stringify({ t: 'chat', text: text }));
+    const now = Date.now();
+    S.sent = S.sent.filter(x => now - x < 5000); S.sent.push(now);
+    if (S.sent.length >= 5) { S.chatLock = now + 10000; S.sent = []; lockT && clearTimeout(lockT); lockTimer(); render(); }
+    return true;
+  }
+  const unreadN = () => S.chat.filter(m => m.id > S.chatSeen && m.pid !== S.you.playerId).length;
+  function quickBtns(cls) {
+    const lock = chatLeft() > 0;
+    return S.quick.map((q, i) => `<button type="button" class="${cls}${onlyEmoji(q) ? ' em' : ''}" data-a="sendQuick" data-i="${i}"${lock ? ' disabled' : ''}>${esc(q)}</button>`).join('');
+  }
+  const lockNote = () => chatLeft() > 0 ? `<p class="qlock" role="status">Mucho mensaje seguido. Podrás escribir en <b class="cdn" data-until="${S.chatLock}">${chatLeft()}</b> s.</p>` : '';
+  function chatDockHTML() {
+    if (!chatOn() || !S.tray) return '';
+    return `<div class="chatdock"><div class="qtray" role="group" aria-label="Mensajes rápidos"><div class="qgrid">${quickBtns('qb')}</div>${lockNote()}
+      <div class="qfoot"><button type="button" class="link" data-a="openChat">Abrir chat</button><button type="button" class="link" data-a="editQuick">Editar accesos</button></div></div></div>`;
+  }
+  function chatPeekHTML() {
+    const k = S.peek;
+    if (!k || Date.now() > k.until || (feltOn() && S.tab === 'table')) return '';
+    return `<div class="chatpeek" role="status"><span class="e">${esc(k.emoji)}</span><span class="t"><b>${esc(k.name)}</b> ${esc(k.text)}</span></div>`;
+  }
+  function chatSheetHTML() {
+    const sh = S.sheet, edit = !!sh.edit;
+    const msgs = S.chat.length ? S.chat.map(m => `<li class="${m.pid === S.you.playerId ? 'mine' : ''}"><span class="e">${esc(m.emoji)}</span><span class="b"><b>${esc(m.name)}</b><span class="t${onlyEmoji(m.text) ? ' big' : ''}">${esc(m.text)}</span></span></li>`).join('') : '<li class="none">Todavía nadie escribe. Usa un acceso rápido o escribe algo corto.</li>';
+    if (edit) {
+      return wrap(`<h3 class="title">Mis accesos rápidos</h3><p class="dim" style="margin-bottom:10px">Emojis o frases cortas (hasta 24 letras). Máximo ${QUICK_MAX}.</p>
+        <ul class="qedit">${S.quick.map((q, i) => `<li><span class="${onlyEmoji(q) ? 'em' : ''}">${esc(q)}</span><button type="button" class="link dng" data-a="quickDel" data-i="${i}" aria-label="Quitar ${esc(q)}">Quitar</button></li>`).join('')}</ul>
+        <form class="chatform" data-submit="quickAdd" novalidate><input class="input" data-f="qnew" maxlength="24" autocomplete="off" placeholder="Nuevo emoji o frase" value="${val('qnew')}"><button class="btn brass" type="submit" data-a="quickAdd"${S.quick.length >= QUICK_MAX ? ' disabled' : ''}>Agregar</button></form>
+        <div class="stackv" style="margin-top:14px"><button class="btn ghost wide" data-a="quickReset">Volver a los de siempre</button><button class="btn main wide" data-a="editDone">Listo</button></div>`);
+    }
+    return wrap(`<h3 class="title">Chat</h3><ul class="chatlist" id="chatlist" aria-live="polite">${msgs}</ul>
+      <div class="qrow">${quickBtns('qb')}</div>${lockNote()}
+      <form class="chatform" data-submit="chatSend" novalidate><input class="input" data-f="chat" maxlength="40" autocomplete="off" enterkeyhint="send" placeholder="Algo corto (hasta 40 letras)" value="${val('chat')}"><button class="btn brass" type="submit" data-a="chatSend"${chatLeft() > 0 ? ' disabled' : ''}>Enviar</button></form>
+      <button type="button" class="link" style="margin-top:8px" data-a="editQuick">Editar mis accesos rápidos</button>`);
+  }
+
+  /* ---------- Banner de tu turno + sonido ---------- */
+  let actx = null;
+  function unlockAudio() {
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) { /* sin audio */ }
+  }
+  function chime() {
+    if (!S.sound || !actx) return;
+    try {
+      if (actx.state === 'suspended') actx.resume();
+      const t = actx.currentTime;
+      [[880, 0], [1318, .15], [1760, .3]].forEach(n => {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.type = 'sine'; o.frequency.value = n[0];
+        g.gain.setValueAtTime(.0001, t + n[1]); g.gain.exponentialRampToValueAtTime(.2, t + n[1] + .02); g.gain.exponentialRampToValueAtTime(.0001, t + n[1] + .24);
+        o.connect(g); g.connect(actx.destination); o.start(t + n[1]); o.stop(t + n[1] + .26);
+      });
+    } catch (e) { /* sin audio */ }
+  }
+  const GRACE_S = 15;
+  function deadline() {
+    const s = S.snap, h = s && s.hand;
+    if (!h || s.phase !== 'betting' || !h.toAct || !(s.settings.turnSeconds > 0)) return null;
+    return h.grace ? { end: h.graceUntil, grace: true } : { end: h.turnStart + s.settings.turnSeconds * 1000, grace: false };
+  }
+  const myTurn = () => !!(S.mode === 'online' && S.snap && S.you.playerId && S.snap.phase === 'betting' && S.snap.hand && S.snap.hand.toAct === S.you.playerId);
+  function turnBannerHTML() {
+    if (!myTurn()) return '';
+    const L = E.legal(S.snap, S.you.playerId), dl = deadline();
+    const big = Date.now() - S.turnSince < 5000;
+    /* Ya lo viste y estás jugando: no tapes los botones. Sólo vuelve en la última oportunidad. */
+    const graceNow = !!(dl && dl.grace);
+    if (!graceNow && ((S.banOff === S.turnSince) || (!big && S.tab === 'hand'))) return '';
+    const what = L.canCheck ? 'Puedes pasar o apostar' : 'Para igualar: ' + fmt(L.callAmt);
+    return `<button type="button" class="turnban${big ? ' big' : ''}${dl && dl.grace ? ' grace' : ''}" data-a="goHand" aria-label="Es tu turno. ${esc(what)}. Toca para jugar"><span class="ring" aria-hidden="true"></span><span class="tx"><b>${dl && dl.grace ? '¡Última oportunidad!' : '¡Es tu turno!'}</b><small>${esc(what)} · Bote ${fmt(potNow())}</small></span>${dl ? `<span class="cd" data-end="${dl.end}" aria-hidden="true"></span>` : ''}</button>`;
   }
 
   /* Vista de mano: tus fichas, valor y botones */
@@ -612,7 +710,8 @@
       head = `<div class="who"><b>${mine ? 'Tu turno' : 'Turno de ' + esc(p.name)}</b><span>${mine ? '' : (isLocal() ? '' : 'Juegas por esta persona')}</span></div>
         <div class="statusline" style="margin:0 0 8px"><span class="dim">Fichas</span> <span class="num" style="font-size:1.5rem;font-weight:900">${fmt(p.stack)}</span></div>`;
     }
-    const timer = s.settings.turnSeconds > 0 ? `<div class="timer" data-t0="${h.turnStart}" data-secs="${s.settings.turnSeconds}"><i></i></div>` : '';
+    const dl = deadline();
+    const timer = dl ? `<div class="timer${dl.grace ? ' grace' : ''}" data-t0="${dl.end - (dl.grace ? GRACE_S : s.settings.turnSeconds) * 1000}" data-secs="${dl.grace ? GRACE_S : s.settings.turnSeconds}"><i></i></div><p class="tlab${dl.grace ? ' grace' : ''}"><span data-end="${dl.end}" class="cd"></span>${dl.grace ? ' Última oportunidad: si no juegas, la app lo hace por ti.' : ''}</p>` : '';
     const dp = `data-pid="${esc(pid)}"`;
     let b = `<button class="btn danger" data-a="act" data-t="fold" ${dp}>Retirarse</button>`;
     if (L.canCheck) b += `<button class="btn main" data-a="act" data-t="check" ${dp}>Pasar</button>`;
@@ -688,6 +787,7 @@
   function sheetHTML() {
     const sh = S.sheet;
     if (sh && sh.type === 'hands') return handsSheetHTML();
+    if (sh && sh.type === 'chat' && S.snap) return chatSheetHTML();
     if (!sh || !S.snap) return '';
     switch (sh.type) {
       case 'more': return moreHTML();
@@ -743,6 +843,7 @@
     let items = '';
     if (!isLocal()) items += menuItem('share', 'Compartir sala', 'Código ' + esc(S.code));
     items += menuItem('log', 'Historial de la mesa', '');
+    if (!isLocal()) items += menuItem('toggleSound', 'Sonido cuando es tu turno', S.sound ? 'Activado' : 'Silenciado');
     if (p) {
       if (s.phase !== 'ended') items += menuItem('sitOut', p.sitOut ? 'Volver a jugar' : 'Sentarme fuera', p.sitOut ? '' : 'Te saltan las manos', '', `data-on="${p.sitOut ? 0 : 1}"`);
       if (s.settings.rebuy && p.stack === 0 && !live() && s.phase !== 'ended') items += menuItem('rebuy', 'Recomprar fichas', fmt(s.settings.rebuyAmount));
@@ -858,6 +959,15 @@
 
   /* ---------- Temporizador de turno ---------- */
   function tickTimers() {
+    document.querySelectorAll('.cd[data-end]').forEach(e => {
+      const left = Math.max(0, Math.ceil((Number(e.dataset.end) - (Date.now() + S.skew)) / 1000));
+      if (e.textContent !== left + ' s') e.textContent = left + ' s';
+    });
+    document.querySelectorAll('.cdn[data-until]').forEach(e => {
+      const left = chatLeft();
+      if (e.textContent !== String(left)) e.textContent = String(left);
+    });
+    if (window.FeltTable && cardsMode()) window.FeltTable.tick(S.skew);
     document.querySelectorAll('.timer').forEach(t => {
       const t0 = Number(t.dataset.t0), secs = Number(t.dataset.secs);
       const left = secs * 1000 - (Date.now() + S.skew - t0);
@@ -924,6 +1034,8 @@
       S.session = { code: m.code, token: m.token };
       lsSet('mf.session', S.session);
       S.code = m.code; S.mode = 'online'; S.you = m.you; S.busy = false; S.error = null; S.canReclaim = false;
+      S.chat = Array.isArray(m.chat) ? m.chat : []; S.chatSeen = S.chat.length ? S.chat[S.chat.length - 1].id : 0;
+      S.chatLock = m.chatLock ? m.chatLock - (S.skew || 0) : 0; lockTimer();
       if (S.screen !== 'game') { S.tab = (m.you.playerId || m.you.isHost) ? 'hand' : 'table'; S.screen = 'game'; S.sheet = null; keepAwake(); }
       if (S.form.name || S.form.emoji) {
         if (m.you.playerId) { S.profile = { name: S.form.name || S.profile.name, emoji: S.form.emoji || S.profile.emoji }; lsSet('mf.profile', S.profile); }
@@ -936,7 +1048,7 @@
       S.skew = m.now - Date.now();
       if (was && was.phase !== m.snap.phase) { S.picks = {}; S.ties = {}; }
       const nowMine = !!(m.snap.hand && m.snap.phase === 'betting' && m.snap.hand.toAct === m.you.playerId && m.you.playerId);
-      if (nowMine && !wasMine) buzz([140, 70, 140]);
+      if (nowMine && !wasMine) { buzz([140, 70, 140]); S.turnSince = Date.now(); chime(); setTimeout(() => { if (myTurn()) render(); }, 5200); }
       if (m.snap.phase === 'betting' && S.snap.hand && S.actFor && S.actFor !== S.snap.hand.toAct) S.actFor = null;
       if (S.okMsg && Date.now() - S.okMsg.t < 1800) { toast(S.okMsg.msg); }
       S.okMsg = null;
@@ -951,6 +1063,16 @@
         closeSocket();
         render();
       }
+    } else if (m.t === 'chat' && m.msg) {
+      const x = m.msg;
+      if (S.chat.some(c => c.id === x.id)) return;
+      S.chat.push(x); if (S.chat.length > 60) S.chat.shift();
+      if (S.sheet && S.sheet.type === 'chat' && !S.sheet.edit) S.chatSeen = x.id;
+      if (window.FeltTable && S.tab === 'table' && feltOn() && !S.sheet) window.FeltTable.say(x.pid, x.text);
+      else if (!(S.sheet && S.sheet.type === 'chat')) { S.peek = { name: x.name, emoji: x.emoji, text: x.text, until: Date.now() + 4200 }; setTimeout(render, 4300); }
+      render();
+    } else if (m.t === 'chatLock') {
+      S.chatLock = m.until - (S.skew || 0); lockTimer(); render();
     } else if (m.t === 'kicked') {
       toast('Te sacaron de la mesa. Puedes seguir mirando o sentarte de nuevo.', true);
     }
@@ -1026,7 +1148,7 @@
     goCreate() {
       if (NATIVE && !savedServer()) { A.goServer('Primero escribe la dirección del servidor para usar salas en línea.'); return; }
       S.form = { name: S.profile.name || '', emoji: S.profile.emoji || EMOJIS[0], seat: true };
-      initSettingsForm(null, 'casual'); S.busy = false; go('create');
+      initSettingsForm(null, 'casual'); S.form.s_turnSeconds = '45'; S.busy = false; go('create');
     },
     goJoin() {
       if (NATIVE && !savedServer()) { A.goServer('Primero escribe la dirección del servidor para usar salas en línea.'); return; }
@@ -1042,9 +1164,26 @@
     openRounds() { S.sheet = { type: 'hands', tab: 'rounds' }; render(); },
     handsTab(el) { S.sheet = { type: 'hands', tab: el.dataset.k }; render(); },
     setView(el) { S.view = el.dataset.k === 'simple' ? 'simple' : 'felt'; lsSet('mf.view', S.view); render(); },
+    toggleTray() { S.tray = !S.tray; render(); },
+    openChat() { S.tray = false; S.sheet = { type: 'chat' }; S.chatSeen = S.chat.length ? S.chat[S.chat.length - 1].id : 0; render(); },
+    editQuick() { S.tray = false; S.form.qnew = ''; S.sheet = { type: 'chat', edit: true }; render(); },
+    editDone() { S.sheet = { type: 'chat' }; render(); },
+    sendQuick(el) { sendChat(S.quick[Number(el.dataset.i)]); },
+    chatSend() { const t = String(S.form.chat || '').trim(); if (t && sendChat(t)) { S.form.chat = ''; render(); } },
+    quickAdd() {
+      const t = Array.from(String(S.form.qnew || '').replace(/\s+/g, ' ').trim()).slice(0, 24).join('');
+      if (!t) return;
+      if (S.quick.indexOf(t) >= 0) { toast('Ya lo tienes'); return; }
+      if (S.quick.length >= QUICK_MAX) { toast('Máximo ' + QUICK_MAX + ' accesos', true); return; }
+      S.quick = S.quick.concat([t]); lsSet('mf.quick', S.quick); S.form.qnew = ''; render();
+    },
+    quickDel(el) { S.quick = S.quick.filter((q, i) => i !== Number(el.dataset.i)); if (!S.quick.length) S.quick = DEFAULT_QUICK.slice(); lsSet('mf.quick', S.quick); render(); },
+    quickReset() { S.quick = DEFAULT_QUICK.slice(); lsSet('mf.quick', S.quick); render(); },
+    goHand() { S.banOff = S.turnSince; S.tab = 'hand'; S.sheet = null; S.tray = false; render(); },
+    toggleSound() { S.sound = !S.sound; lsSet('mf.sound', S.sound); if (S.sound) { unlockAudio(); chime(); } render(); },
     toggleHide() { S.hide = !S.hide; lsSet('mf.hide', S.hide); render(); },
     toggleSeat() { S.form.seat = !S.form.seat; render(); },
-    preset(el) { const keep = { r: S.form.s_rebuy, w: S.form.s_winnerPicker }; initSettingsForm(null, el.dataset.k); S.form.s_rebuy = keep.r; S.form.s_winnerPicker = keep.w; render(); },
+    preset(el) { const keep = { r: S.form.s_rebuy, w: S.form.s_winnerPicker, t: S.form.s_turnSeconds }; initSettingsForm(null, el.dataset.k); S.form.s_rebuy = keep.r; S.form.s_winnerPicker = keep.w; if (keep.t != null) S.form.s_turnSeconds = keep.t; render(); },
     setopt(el) {
       const v = el.dataset.v;
       S.form[el.dataset.k] = (v === 'true') ? true : (v === 'false') ? false : v;
@@ -1256,6 +1395,7 @@
   });
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; });
 
+  document.addEventListener('pointerdown', unlockAudio, { passive: true });
   document.addEventListener('touchstart', () => { /* activa :active en iPhone (ver mis cartas con el dedo) */ }, { passive: true });
 
   /* ---------- Inicio ---------- */

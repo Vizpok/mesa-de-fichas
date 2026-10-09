@@ -42,7 +42,38 @@ const newToken = () => crypto.randomBytes(12).toString('hex');
 const clean = (s, n) => String(s == null ? '' : s).trim().slice(0, n || 14);
 
 function makeRoom(code, table) {
-  return { code, table, members: new Map(), lastActive: Date.now(), hostSeen: Date.now(), dirty: false };
+  return { code, table, members: new Map(), lastActive: Date.now(), hostSeen: Date.now(), dirty: false, chat: [], chatSeq: 0 };
+}
+
+/* ---------------- Chat ---------------- */
+// Máximo 5 mensajes en 5 segundos; al llegar al 5.º, 10 segundos de espera. Lo decide el servidor.
+const CHAT_MAX = 40, CHAT_WINDOW = 5000, CHAT_BURST = 5, CHAT_LOCK = 10000, CHAT_KEEP = 40;
+function sendMember(member, obj) {
+  const payload = JSON.stringify(obj);
+  member.sockets.forEach(ws => { if (ws.readyState === 1) ws.send(payload); });
+}
+function handleChat(ws, msg) {
+  const c = ws.ctx;
+  if (!c) return;
+  const room = c.room, member = c.member, now = Date.now();
+  const p = member.playerId && room.table.player(member.playerId);
+  if (!p || p.status === 'left') return fail(ws, 'Siéntate en la mesa para escribir en el chat');
+  const text = Array.from(String(msg.text == null ? '' : msg.text).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, CHAT_MAX).join('');
+  if (!text) return;
+  if (member.chatLock && member.chatLock > now) return send(ws, { t: 'chatLock', until: member.chatLock });
+  member.chatLock = 0;
+  member.chatTimes = (member.chatTimes || []).filter(x => now - x < CHAT_WINDOW);
+  member.chatTimes.push(now);
+  const m = { id: ++room.chatSeq, pid: p.id, name: p.name, emoji: p.emoji, text, ts: now };
+  room.chat.push(m);
+  if (room.chat.length > CHAT_KEEP) room.chat.shift();
+  room.lastActive = now;
+  const payload = JSON.stringify({ t: 'chat', msg: m });
+  room.members.forEach(mm => mm.sockets.forEach(w => { if (w.readyState === 1) w.send(payload); }));
+  if (member.chatTimes.length >= CHAT_BURST) {
+    member.chatLock = now + CHAT_LOCK; member.chatTimes = [];
+    sendMember(member, { t: 'chatLock', until: member.chatLock });
+  }
 }
 function addMember(room, extra) {
   const m = Object.assign({ token: newToken(), playerId: null, isHost: false, sockets: new Set() }, extra || {});
@@ -131,7 +162,7 @@ function attach(ws, room, member) {
   member.sockets.add(ws);
   ws.ctx = { room, member };
   room.lastActive = Date.now();
-  send(ws, { t: 'hello', code: room.code, token: member.token, you: you(member, room) });
+  send(ws, { t: 'hello', code: room.code, token: member.token, you: you(member, room), chat: room.chat.slice(-30), chatLock: member.chatLock > Date.now() ? member.chatLock : 0 });
   broadcast(room);
 }
 function detach(ws) {
@@ -277,6 +308,7 @@ wss.on('connection', ws => {
         case 'create': return handleCreate(ws, msg);
         case 'join': return handleJoin(ws, msg);
         case 'cmd': return handleCmd(ws, msg);
+        case 'chat': return handleChat(ws, msg);
         case 'ping': return send(ws, { t: 'pong', now: Date.now() });
         case 'leaveRoom': return detach(ws);
       }
